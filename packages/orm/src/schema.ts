@@ -1,0 +1,621 @@
+import {
+  sqliteTable,
+  AnySQLiteColumn,
+  index,
+  foreignKey,
+  check,
+  text,
+  uniqueIndex,
+  integer
+} from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+
+export const approvals = sqliteTable(
+  'approvals',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null'
+    }),
+    toolCallId: text('tool_call_id')
+      .notNull()
+      .references(() => toolCalls.id, { onDelete: 'cascade' }),
+    kind: text().notNull(),
+    status: text().default('pending').notNull(),
+    decisionScope: text('decision_scope').default('once').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    suggestedRuleJson: text('suggested_rule_json'),
+    decidedBy: text('decided_by'),
+    decisionReasonText: text('decision_reason_text'),
+    createdAt: text('created_at').notNull(),
+    decidedAt: text('decided_at')
+  },
+  (table) => [
+    index('idx_approvals_tool_call_id').on(table.toolCallId),
+    index('idx_approvals_session_status_created_at').on(
+      table.sessionId,
+      table.status,
+      table.createdAt
+    ),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const artifacts = sqliteTable(
+  'artifacts',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null'
+    }),
+    toolCallId: text('tool_call_id').references(() => toolCalls.id, {
+      onDelete: 'set null'
+    }),
+    kind: text().notNull(),
+    title: text().notNull(),
+    mimeType: text('mime_type').default('text/plain').notNull(),
+    bodyText: text('body_text'),
+    payloadJson: text('payload_json'),
+    createdAt: text('created_at').notNull()
+  },
+  (table) => [
+    index('idx_artifacts_task_created_at').on(table.taskId, table.createdAt),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null'
+    }),
+    role: text().notNull(),
+    kind: text().default('message').notNull(),
+    contentJson: text('content_json').notNull(),
+    createdAt: text('created_at').notNull()
+  },
+  (table) => [
+    index('idx_messages_task_created_at').on(table.taskId, table.createdAt),
+    index('idx_messages_session_created_at').on(
+      table.sessionId,
+      table.createdAt
+    ),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const plans = sqliteTable(
+  'plans',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    version: integer().notNull(),
+    status: text().default('draft').notNull(),
+    summaryText: text('summary_text'),
+    source: text().default('model').notNull(),
+    createdAt: text('created_at').notNull(),
+    confirmedAt: text('confirmed_at'),
+    supersededAt: text('superseded_at')
+  },
+  (table) => [
+    uniqueIndex('plans_session_version_idx').on(table.sessionId, table.version),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const sessionEvents = sqliteTable(
+  'session_events',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null'
+    }),
+    sequenceNo: integer('sequence_no').notNull(),
+    type: text().notNull(),
+    level: text().default('info').notNull(),
+    entityType: text('entity_type'),
+    entityId: text('entity_id'),
+    headline: text(),
+    detailText: text('detail_text'),
+    payloadJson: text('payload_json').default('{}').notNull(),
+    createdAt: text('created_at').notNull()
+  },
+  (table) => [
+    index('idx_session_events_task_sequence').on(
+      table.taskId,
+      table.sequenceNo
+    ),
+    index('idx_session_events_session_sequence').on(
+      table.sessionId,
+      table.sequenceNo
+    ),
+    uniqueIndex('session_events_session_sequence_idx').on(
+      table.sessionId,
+      table.sequenceNo
+    ),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text().primaryKey().notNull(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    title: text().notNull(),
+    goalText: text('goal_text').notNull(),
+    status: text().default('planning').notNull(),
+    currentPlanId: text('current_plan_id'),
+    currentTaskId: text('current_task_id'),
+    lastErrorText: text('last_error_text'),
+    lastCheckpointJson: text('last_checkpoint_json'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    archivedAt: text('archived_at')
+  },
+  (table) => [
+    index('idx_sessions_status').on(table.status),
+    index('idx_sessions_workspace_updated_at').on(
+      table.workspaceId,
+      table.updatedAt
+    ),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const tasks = sqliteTable(
+  'tasks',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => plans.id, { onDelete: 'cascade' }),
+    parentTaskId: text('parent_task_id'),
+    position: integer().notNull(),
+    title: text().notNull(),
+    description: text(),
+    acceptanceCriteriaJson: text('acceptance_criteria_json')
+      .default('[]')
+      .notNull(),
+    status: text().default('todo').notNull(),
+    summaryText: text('summary_text'),
+    lastErrorText: text('last_error_text'),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    updatedAt: text('updated_at').notNull()
+  },
+  (table) => [
+    index('idx_tasks_session_status').on(table.sessionId, table.status),
+    index('idx_tasks_session_position').on(table.sessionId, table.position),
+    uniqueIndex('tasks_plan_position_idx').on(table.planId, table.position),
+    foreignKey(() => ({
+      columns: [table.parentTaskId],
+      foreignColumns: [table.id],
+      name: 'tasks_parent_task_id_tasks_id_fk'
+    })).onDelete('cascade'),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const toolCalls = sqliteTable(
+  'tool_calls',
+  {
+    id: text().primaryKey().notNull(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'set null'
+    }),
+    messageId: text('message_id').references(() => messages.id, {
+      onDelete: 'set null'
+    }),
+    toolName: text('tool_name').notNull(),
+    inputJson: text('input_json').notNull(),
+    status: text().notNull(),
+    requiresApproval: integer('requires_approval').default(0).notNull(),
+    resultJson: text('result_json'),
+    errorText: text('error_text'),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull()
+  },
+  (table) => [
+    index('idx_tool_calls_task_status').on(table.taskId, table.status),
+    index('idx_tool_calls_session_created_at').on(
+      table.sessionId,
+      table.createdAt
+    ),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);
+
+export const workspaces = sqliteTable(
+  'workspaces',
+  {
+    id: text().primaryKey().notNull(),
+    name: text().notNull(),
+    rootPath: text('root_path').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    lastOpenedAt: text('last_opened_at').notNull()
+  },
+  (table) => [
+    index('idx_workspaces_last_opened_at').on(table.lastOpenedAt),
+    uniqueIndex('workspaces_root_path_idx').on(table.rootPath),
+    check('approvals_check_1', sql`kind IN ('write_file', 'run_command'`),
+    check(
+      'approvals_check_2',
+      sql`status IN ('pending', 'approved', 'rejected'`
+    ),
+    check('approvals_check_3', sql`decision_scope IN ('once', 'session_rule'`),
+    check(
+      'artifacts_check_4',
+      sql`kind IN ('diff', 'stdout', 'stderr', 'error', 'file_snapshot', 'plan_summary', 'task_summary', 'final_result'`
+    ),
+    check(
+      'artifacts_check_5',
+      sql`body_text IS NOT NULL OR payload_json IS NOT NULL`
+    ),
+    check(
+      'messages_check_6',
+      sql`role IN ('system', 'user', 'assistant', 'tool'`
+    ),
+    check('plans_check_7', sql`status IN ('draft', 'confirmed', 'superseded'`),
+    check(
+      'session_events_check_8',
+      sql`level IN ('debug', 'info', 'warning', 'error'`
+    ),
+    check(
+      'sessions_check_9',
+      sql`status IN ('planning', 'executing', 'waiting_approval', 'blocked', 'failed', 'completed', 'archived'`
+    ),
+    check(
+      'tasks_check_10',
+      sql`status IN ('todo', 'ready', 'running', 'blocked', 'waiting_approval', 'done', 'failed'`
+    ),
+    check(
+      'tool_calls_check_11',
+      sql`tool_name IN ('read_file', 'write_file', 'run_command'`
+    ),
+    check(
+      'tool_calls_check_12',
+      sql`status IN ('pending_approval', 'approved', 'rejected', 'running', 'completed', 'failed'`
+    ),
+    check('tool_calls_check_13', sql`requires_approval IN (0, 1`)
+  ]
+);

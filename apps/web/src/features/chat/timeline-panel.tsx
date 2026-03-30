@@ -1,65 +1,54 @@
-import type { SessionEvent } from '@opencode/shared';
+import type { MockTimelineItem } from '../../lib/mock-data';
 
 type TimelinePanelProps = {
-  events: SessionEvent[];
+  items: MockTimelineItem[];
 };
 
-function eventLabel(event: SessionEvent) {
-  switch (event.type) {
-    case 'message.created':
-      return event.message.role;
-    case 'tool.pending':
-      return event.toolCall.toolName;
-    case 'tool.completed':
-      return event.toolCall.toolName;
-    case 'approval.resolved':
-      return event.decision;
+function statusClassName(status: MockTimelineItem['status']) {
+  switch (status) {
+    case 'active':
+      return 'bg-amber-100 text-amber-800';
+    case 'success':
+      return 'bg-emerald-100 text-emerald-700';
+    case 'warning':
+      return 'bg-rose-100 text-rose-700';
+    case 'error':
+      return 'bg-red-100 text-red-700';
     default:
-      return event.type;
+      return 'bg-slate-100 text-slate-700';
   }
 }
 
-function eventBody(event: SessionEvent) {
-  switch (event.type) {
-    case 'message.created':
-      return event.message.content
-        .map((part) => ('text' in part ? part.text : part.toolName))
-        .join(' ');
-    case 'tool.pending':
-      return JSON.stringify(event.toolCall.input, null, 2);
-    case 'tool.completed':
-      return event.toolCall.result
-        ? JSON.stringify(event.toolCall.result, null, 2)
-        : 'Completed';
-    case 'approval.resolved':
-      return `Decision: ${event.decision}`;
-    case 'session.failed':
-      return event.error;
-    default:
-      return event.type;
-  }
-}
-
-export function TimelinePanel({ events }: TimelinePanelProps) {
+export function TimelinePanel({ items }: TimelinePanelProps) {
   return (
     <div className="space-y-3">
-      {events.map((event, index) => (
+      {items.map((item) => (
         <article
-          key={`${event.type}-${index}`}
-          className="rounded-2xl border border-sand bg-mist p-4"
+          key={item.id}
+          className="rounded-[24px] border border-sand bg-mist/80 p-4"
         >
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2">
-              <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-ember">
-                {eventLabel(event)}
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClassName(item.status)}`}
+              >
+                {item.label}
               </span>
-              <span className="text-xs text-slate-500">{event.sessionId}</span>
+              <span className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                {item.type}
+              </span>
             </div>
-            <span className="text-xs text-slate-500">step {index + 1}</span>
+            <span className="rounded-full border border-white bg-white/80 px-3 py-1 text-xs text-slate-500">
+              {item.time}
+            </span>
           </div>
-          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">
-            {eventBody(event)}
-          </pre>
+
+          <h3 className="mt-3 text-base font-semibold text-ink">
+            {item.title}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            {item.description}
+          </p>
         </article>
       ))}
     </div>

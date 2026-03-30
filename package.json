@@ -4,6 +4,10 @@
   "packageManager": "pnpm@10.6.0",
   "scripts": {
     "build": "pnpm -r build",
+    "db:apply": "pnpm --filter @opencode/db apply",
+    "db:lint": "pnpm --filter @opencode/db lint",
+    "db:status": "pnpm --filter @opencode/db status",
+    "db:sync": "pnpm --filter @opencode/orm introspect",
     "dev:server": "pnpm --filter @opencode/server dev",
     "dev:web": "pnpm --filter @opencode/web dev",
     "format": "prettier --write --log-level warn \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yaml,yml}\"",

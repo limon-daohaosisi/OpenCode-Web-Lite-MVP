@@ -34,6 +34,9 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - name: Setup Atlas
+        uses: ariga/setup-atlas@v0
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -45,6 +48,17 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Validate Atlas Schema
+        run: atlas schema inspect --dev-url 'sqlite://dev?mode=memory' --url file://packages/db/schema
+
+      - name: Apply Database Migrations
+        run: DATABASE_URL='sqlite:///tmp/opencode-ci.db' pnpm db:apply
+
+      - name: Verify ORM Schema Sync
+        run: |
+          DATABASE_PATH='/tmp/opencode-ci.db' pnpm db:sync
+          git diff --exit-code -- packages/orm/src/schema.ts packages/orm/src/relations.ts
 
       - name: Build
         run: pnpm build

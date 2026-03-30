@@ -1,0 +1,21 @@
+{
+  "name": "@opencode/orm",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "format:schema": "prettier --write src/schema.ts src/relations.ts",
+    "introspect": "drizzle-kit pull --config drizzle.config.ts && node ./scripts/cleanup-introspect.mjs && pnpm format:schema",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.5"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.4",
+    "typescript": "^5.8.2"
+  }
+}

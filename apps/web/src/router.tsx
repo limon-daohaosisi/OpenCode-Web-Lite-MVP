@@ -3,22 +3,20 @@ import {
   Outlet,
   createRootRoute,
   createRoute,
-  createRouter
+  createRouter,
+  useParams
 } from '@tanstack/react-router';
 import { AppShell } from './components/app-shell';
 import { Composer } from './features/chat/composer';
 import { TimelinePanel } from './features/chat/timeline-panel';
-import { ApprovalCenter } from './features/approvals/approval-center';
-import { FileExplorer } from './features/explorer/file-explorer';
-import { FilePreview } from './features/explorer/file-preview';
+import { DetailPane } from './features/details/detail-pane';
 import { SessionList } from './features/sessions/session-list';
+import { TaskBoard } from './features/tasks/task-board';
 import { useSessionStream } from './hooks/use-session-stream';
 import {
+  getMockSession,
   primarySession,
-  sampleApprovals,
   sampleSessions,
-  sampleTimeline,
-  sampleTree,
   sampleWorkspace
 } from './lib/mock-data';
 
@@ -38,12 +36,11 @@ function HomePage() {
           OpenCode Web Lite
         </p>
         <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink">
-          Local-first coding agent console skeleton for timeline replay,
-          approvals, and workspace browsing.
+          复杂任务优先的 agent 工作台原型，先拆解任务，再进入执行。
         </h1>
         <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-          The monorepo is ready. The next step is wiring the real API, SQLite
-          persistence, and the agent loop.
+          这版页面 mock 的重点不是聊天记录，而是“复杂任务列表、任务板、
+          执行时间线、详情区”之间的关系。
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-4">
           <Link
@@ -57,7 +54,7 @@ function HomePage() {
             Open Workspace
           </Link>
           <div className="rounded-full border border-sand bg-mist px-5 py-3 text-sm text-slate-600">
-            Workspace root:{' '}
+            工作区路径：
             <span className="font-medium text-ink">
               /Users/demo/opencode-lite
             </span>
@@ -70,6 +67,10 @@ function HomePage() {
 
 function WorkspacePage() {
   const stream = useSessionStream();
+  const { sessionId } = useParams({
+    from: '/workspace/$workspaceId/session/$sessionId'
+  });
+  const currentSession = getMockSession(sessionId);
 
   return (
     <div className="min-h-screen px-4 py-4 md:px-6">
@@ -81,6 +82,7 @@ function WorkspacePage() {
           <h1 className="text-xl font-semibold text-ink">
             {sampleWorkspace.name}
           </h1>
+          <p className="mt-1 text-sm text-slate-600">{currentSession.title}</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
           <span className="rounded-full border border-sand bg-mist px-3 py-1.5">
@@ -99,33 +101,38 @@ function WorkspacePage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_420px]">
-        <SessionList sessions={sampleSessions} />
+        <SessionList
+          currentSessionId={currentSession.id}
+          sessions={sampleSessions}
+        />
 
-        <section className="rounded-[28px] border border-white/60 bg-white/80 p-5 shadow-panel backdrop-blur">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.25em] text-ember">
-                Timeline Replay
-              </p>
-              <h2 className="text-lg font-semibold text-ink">Session Run</h2>
-            </div>
-            <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-              1 pending approval
-            </div>
-          </div>
-          <TimelinePanel events={sampleTimeline} />
-          <Composer />
-        </section>
+        <div className="space-y-4">
+          <TaskBoard session={currentSession} />
 
-        <div className="grid gap-4">
-          <ApprovalCenter approvals={sampleApprovals} />
           <section className="rounded-[28px] border border-white/60 bg-white/80 p-5 shadow-panel backdrop-blur">
-            <div className="grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)]">
-              <FileExplorer tree={sampleTree} />
-              <FilePreview />
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-ember">
+                  Execution Timeline
+                </p>
+                <h2 className="text-lg font-semibold text-ink">执行时间线</h2>
+              </div>
+              <div className="rounded-full border border-sand bg-mist px-3 py-1.5 text-sm text-slate-600">
+                {currentSession.pendingApprovals
+                  ? `${currentSession.pendingApprovals} 个待审批动作`
+                  : '当前无待审批动作'}
+              </div>
             </div>
+
+            <TimelinePanel items={currentSession.timeline} />
+            <Composer
+              defaultValue={currentSession.composerValue}
+              hint={currentSession.composerHint}
+            />
           </section>
         </div>
+
+        <DetailPane data={currentSession.detailPane} />
       </div>
     </div>
   );

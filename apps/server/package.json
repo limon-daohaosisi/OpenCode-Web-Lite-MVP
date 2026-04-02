@@ -6,16 +6,19 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/main.ts",
     "lint": "eslint . --ext .ts --cache --cache-strategy content --cache-location .eslintcache",
+    "test": "node --import tsx --test src/__tests__/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
+    "@hono/zod-validator": "^0.7.6",
     "@opencode/agent-core": "workspace:*",
     "@opencode/orm": "workspace:*",
     "@opencode/shared": "workspace:*",
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.44.5",
-    "hono": "^4.7.2"
+    "hono": "^4.7.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { agentRoutes } from './routes/agent.js';
-import { approvalRoutes } from './routes/approvals.js';
-import { fileRoutes } from './routes/files.js';
-import { sessionRoutes } from './routes/sessions.js';
-import { workspaceRoutes } from './routes/workspaces.js';
+import { agentRoutes } from './routes/agent/agent.route.js';
+import { approvalRoutes } from './routes/approvals/approvals.route.js';
+import { fileRoutes } from './routes/files/files.route.js';
+import { sessionRoutes } from './routes/sessions/sessions.route.js';
+import { workspaceRoutes } from './routes/workspaces/workspaces.route.js';
 
 const appInstance = new Hono()
   .use('/api/*', cors())

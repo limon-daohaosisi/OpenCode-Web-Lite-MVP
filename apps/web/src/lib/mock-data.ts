@@ -78,6 +78,7 @@ export type MockSessionView = SessionDto & {
 };
 
 export const sampleWorkspace: WorkspaceDto & { model: string } = {
+  createdAt: '2026-03-29 10:30',
   id: 'local-demo',
   lastOpenedAt: '2026-03-29 10:30',
   model: 'gpt-4.1-mini',
@@ -140,6 +141,8 @@ export const sampleSessions: MockSessionView[] = [
     composerHint: '规划阶段先确认任务拆解，再进入执行。',
     composerValue: '把第 3 个小任务拆得更细一点，并明确验收标准。',
     createdAt: '2026-03-29 09:12',
+    goalText:
+      '把 OpenCode Web Lite 的主工作台改成“复杂任务 -> 小任务 -> 时间线 -> 详情区”的结构，并弱化重型审批中心。',
     detailPane: {
       activeTab: '产物',
       content: `规划摘要
@@ -173,7 +176,7 @@ export const sampleSessions: MockSessionView[] = [
       '规划确认后不跳页，直接把同一区域切换为执行态。'
     ],
     progressLabel: '等待确认计划',
-    status: 'active',
+    status: 'planning',
     summary: '正在审核复杂任务拆解，尚未开始执行。',
     tasks: [
       {
@@ -255,6 +258,8 @@ export const sampleSessions: MockSessionView[] = [
     composerHint: '执行阶段可以补充约束，或要求重试当前任务。',
     composerValue: '先别继续改文档，先把中间列任务板的视觉层级做清楚。',
     createdAt: '2026-03-29 10:02',
+    goalText:
+      '把新的复杂任务工作台真实渲染出来，包括左侧复杂任务列表、中间任务板与执行时间线、右侧详情区。',
     detailPane: {
       activeTab: 'Diff',
       content: `diff --git a/apps/web/src/router.tsx b/apps/web/src/router.tsx

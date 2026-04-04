@@ -1,52 +1,134 @@
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { WorkspaceDto } from '@opencode/shared';
+import type { CreateWorkspaceInput, WorkspaceDto } from '@opencode/shared';
+import { workspaceRepository } from '../repositories/workspace-repository.js';
+import { ServiceError } from './service-error.js';
 
-const workspaces = new Map<string, WorkspaceDto>([
-  [
-    'local-demo',
-    {
-      id: 'local-demo',
-      lastOpenedAt: '2026-03-23T23:30:00.000Z',
-      name: 'OpenCode Web Lite MVP',
-      rootPath: '/Users/demo/opencode-lite',
-      updatedAt: '2026-03-23T23:30:00.000Z'
-    }
-  ]
+type FileTreeNode = {
+  children?: FileTreeNode[];
+  name: string;
+  type: 'directory' | 'file';
+};
+
+const IGNORED_DIRECTORY_NAMES = new Set([
+  '.git',
+  '.next',
+  '.turbo',
+  'dist',
+  'node_modules'
 ]);
 
-const sampleTree = [
-  {
-    children: [
-      { name: 'src', type: 'directory' },
-      { name: 'package.json', type: 'file' }
-    ],
-    name: 'apps',
-    type: 'directory'
+function createFileTreeNode(
+  rootPath: string,
+  currentPath: string
+): FileTreeNode {
+  const stats = statSync(currentPath);
+  const name =
+    currentPath === rootPath
+      ? path.basename(rootPath)
+      : path.basename(currentPath);
+
+  if (!stats.isDirectory()) {
+    return {
+      name,
+      type: 'file'
+    };
   }
-];
+
+  const children = readdirSync(currentPath, { withFileTypes: true })
+    .filter((entry) => !IGNORED_DIRECTORY_NAMES.has(entry.name))
+    .sort((left, right) => {
+      if (left.isDirectory() !== right.isDirectory()) {
+        return left.isDirectory() ? -1 : 1;
+      }
+
+      return left.name.localeCompare(right.name);
+    })
+    .map((entry) =>
+      createFileTreeNode(rootPath, path.join(currentPath, entry.name))
+    );
+
+  return {
+    children,
+    name,
+    type: 'directory'
+  };
+}
+
+function normalizeWorkspaceRootPath(rootPath: string): string {
+  const absolutePath = path.resolve(rootPath);
+  const canonicalPath = existsSync(absolutePath)
+    ? realpathSync(absolutePath)
+    : absolutePath;
+
+  if (!existsSync(canonicalPath)) {
+    throw new ServiceError(
+      `Workspace path does not exist: ${canonicalPath}`,
+      400
+    );
+  }
+
+  if (!statSync(canonicalPath).isDirectory()) {
+    throw new ServiceError(
+      `Workspace path is not a directory: ${canonicalPath}`,
+      400
+    );
+  }
+
+  return canonicalPath;
+}
 
 export const workspaceService = {
-  createWorkspace(rootPath: string): WorkspaceDto {
+  createWorkspace(input: CreateWorkspaceInput): WorkspaceDto {
+    const canonicalPath = normalizeWorkspaceRootPath(input.rootPath);
     const now = new Date().toISOString();
-    const id = path.basename(rootPath) || `workspace-${workspaces.size + 1}`;
+    const existingWorkspace = workspaceRepository.getByRootPath(canonicalPath);
 
-    const workspace: WorkspaceDto = {
-      id,
+    if (existingWorkspace) {
+      return (
+        workspaceRepository.touchLastOpenedAt(existingWorkspace.id, now) ??
+        existingWorkspace
+      );
+    }
+
+    const name = path.basename(canonicalPath) || canonicalPath;
+
+    return workspaceRepository.create({
+      createdAt: now,
+      id: randomUUID(),
       lastOpenedAt: now,
-      name: path.basename(rootPath) || rootPath,
-      rootPath,
+      name,
+      rootPath: canonicalPath,
       updatedAt: now
-    };
-
-    workspaces.set(id, workspace);
-    return workspace;
+    });
   },
 
-  getTree(_workspaceId?: string) {
-    return sampleTree;
+  getTree(workspaceId: string) {
+    const workspace = workspaceRepository.getById(workspaceId);
+
+    if (!workspace) {
+      throw new ServiceError(`Workspace not found: ${workspaceId}`, 404);
+    }
+
+    if (
+      !existsSync(workspace.rootPath) ||
+      !statSync(workspace.rootPath).isDirectory()
+    ) {
+      throw new ServiceError(
+        `Workspace root path is unavailable: ${workspace.rootPath}`,
+        500
+      );
+    }
+
+    return [createFileTreeNode(workspace.rootPath, workspace.rootPath)];
+  },
+
+  getWorkspace(workspaceId: string) {
+    return workspaceRepository.getById(workspaceId);
   },
 
   listWorkspaces() {
-    return Array.from(workspaces.values());
+    return workspaceRepository.list();
   }
 };

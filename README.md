@@ -18,7 +18,7 @@ packages/
 ```bash
 pnpm install
 pnpm dev:web
-pnpm dev:server
+DATABASE_PATH=./data/opencode.db pnpm dev:server
 ```
 
 ## 当前状态

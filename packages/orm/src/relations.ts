@@ -9,7 +9,7 @@ import {
   plans,
   sessionEvents,
   workspaces
-} from './schema';
+} from './schema.js';
 
 export const approvalsRelations = relations(approvals, ({ one }) => ({
   toolCall: one(toolCalls, {

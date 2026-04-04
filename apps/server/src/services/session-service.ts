@@ -1,39 +1,35 @@
-import type { MessageDto, SessionDto } from '@opencode/shared';
+import { randomUUID } from 'node:crypto';
+import type {
+  CreateSessionInput,
+  MessageDto,
+  ResumeSessionDto,
+  SessionDto
+} from '@opencode/shared';
+import { sessionRepository } from '../repositories/session-repository.js';
+import { workspaceRepository } from '../repositories/workspace-repository.js';
+import { ServiceError } from './service-error.js';
 
-const sessions = new Map<string, SessionDto>([
-  [
-    'session-001',
-    {
-      createdAt: '2026-03-23T23:21:00.000Z',
-      id: 'session-001',
-      status: 'waiting_approval',
-      title: 'Refine auth redirect behavior',
-      updatedAt: '2026-03-23T23:28:00.000Z',
-      workspaceId: 'local-demo'
-    }
-  ]
-]);
+const messages = new Map<string, MessageDto[]>();
 
-const messages = new Map<string, MessageDto[]>([
-  [
-    'session-001',
-    [
-      {
-        content: [
-          {
-            text: 'Review the auth flow and patch the redirect bug.',
-            type: 'text'
-          }
-        ],
-        createdAt: '2026-03-23T23:21:00.000Z',
-        id: 'msg-user-001',
-        kind: 'message',
-        role: 'user',
-        sessionId: 'session-001'
-      }
-    ]
-  ]
-]);
+function buildSessionTitle(goalText: string, title?: string): string {
+  const trimmedTitle = title?.trim();
+
+  if (trimmedTitle) {
+    return trimmedTitle;
+  }
+
+  const firstLine = goalText
+    .trim()
+    .split(/\r?\n/u)
+    .find((line) => line.trim().length > 0);
+
+  const fallbackTitle = (firstLine ?? 'New session')
+    .trim()
+    .replace(/\s+/gu, ' ');
+  return fallbackTitle.length <= 60
+    ? fallbackTitle
+    : `${fallbackTitle.slice(0, 57).trimEnd()}...`;
+}
 
 export function buildAssistantMessage(
   sessionId: string,
@@ -50,24 +46,30 @@ export function buildAssistantMessage(
 }
 
 export const sessionService = {
-  createSession(workspaceId: string, title?: string): SessionDto {
-    const now = new Date().toISOString();
-    const session: SessionDto = {
-      createdAt: now,
-      id: `session-${Date.now()}`,
-      status: 'active',
-      title: title || 'New session',
-      updatedAt: now,
-      workspaceId
-    };
+  createSession(input: CreateSessionInput): SessionDto {
+    const workspace = workspaceRepository.getById(input.workspaceId);
 
-    sessions.set(session.id, session);
+    if (!workspace) {
+      throw new ServiceError(`Workspace not found: ${input.workspaceId}`, 404);
+    }
+
+    const now = new Date().toISOString();
+    const session = sessionRepository.create({
+      createdAt: now,
+      goalText: input.goalText.trim(),
+      id: randomUUID(),
+      status: 'planning',
+      title: buildSessionTitle(input.goalText, input.title),
+      updatedAt: now,
+      workspaceId: input.workspaceId
+    });
+
     messages.set(session.id, []);
     return session;
   },
 
   getSession(sessionId: string) {
-    return sessions.get(sessionId);
+    return sessionRepository.getById(sessionId);
   },
 
   listMessages(sessionId: string) {
@@ -75,16 +77,21 @@ export const sessionService = {
   },
 
   listSessions(workspaceId: string) {
-    return Array.from(sessions.values()).filter(
-      (session) => session.workspaceId === workspaceId
-    );
+    return sessionRepository.listByWorkspace(workspaceId);
   },
 
-  resumeSession(sessionId: string) {
-    const session = sessions.get(sessionId);
+  resumeSession(sessionId: string): ResumeSessionDto {
+    const session = sessionRepository.getById(sessionId);
+
+    if (!session) {
+      return {
+        canResume: false
+      };
+    }
 
     return {
-      canResume: Boolean(session),
+      canResume: true,
+      checkpoint: session.lastCheckpointJson,
       session
     };
   }

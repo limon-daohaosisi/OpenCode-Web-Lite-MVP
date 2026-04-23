@@ -38,3 +38,9 @@ export type SessionEvent =
       updatedAt?: string;
       timestamp?: string;
     };
+
+export type SessionEventEnvelope = {
+  createdAt: string;
+  event: SessionEvent;
+  sequenceNo: number;
+};

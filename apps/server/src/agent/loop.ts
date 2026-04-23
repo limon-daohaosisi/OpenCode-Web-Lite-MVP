@@ -1,6 +1,5 @@
-import type { MessageDto } from '@opencode/shared';
-import { buildAssistantMessage } from '../services/session-service.js';
-import { MockModelClient, type ModelClient } from './model-client.js';
+import type { SubmitSessionMessageResponse } from '@opencode/shared';
+import { agentRuntime, type AgentRuntime } from './runtime.js';
 
 type SubmitUserMessageInput = {
   content: string;
@@ -8,13 +7,18 @@ type SubmitUserMessageInput = {
 };
 
 export class AgentLoop {
-  constructor(
-    private readonly modelClient: ModelClient = new MockModelClient()
-  ) {}
+  constructor(private readonly runtime: AgentRuntime = agentRuntime) {}
 
-  async submitUserMessage(input: SubmitUserMessageInput): Promise<MessageDto> {
-    const result = await this.modelClient.complete(input);
+  submitUserMessage(
+    input: SubmitUserMessageInput
+  ): Promise<SubmitSessionMessageResponse> {
+    return this.runtime.submitUserMessage(input);
+  }
 
-    return buildAssistantMessage(input.sessionId, result.content);
+  resolveApproval(input: {
+    approvalId: string;
+    decision: 'approved' | 'rejected';
+  }) {
+    return this.runtime.resolveApproval(input);
   }
 }

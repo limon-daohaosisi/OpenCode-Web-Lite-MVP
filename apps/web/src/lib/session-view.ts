@@ -1,5 +1,7 @@
 import type {
+  MessageDto,
   ResumeSessionDto,
+  SessionEventEnvelope,
   SessionDto,
   WorkspaceDto
 } from '@opencode/shared';
@@ -7,6 +9,7 @@ import type { WorkspaceTreeNodeDto } from './api';
 import type {
   MockDetailPane,
   MockFileNode,
+  MockTimelineItem,
   MockSessionView
 } from './mock-data';
 import { sampleSessions } from './mock-data';
@@ -33,6 +36,325 @@ function formatTimestamp(timestamp: string) {
     hour: '2-digit',
     minute: '2-digit',
     month: '2-digit'
+  });
+}
+
+function getMessageBodyText(message: MessageDto) {
+  return message.content
+    .map((part) => {
+      if (
+        part.type === 'text' ||
+        part.type === 'reasoning' ||
+        part.type === 'summary'
+      ) {
+        return part.text;
+      }
+
+      if (part.type === 'patch') {
+        return JSON.stringify(part.files, null, 2);
+      }
+
+      return JSON.stringify(part.content, null, 2);
+    })
+    .join('\n')
+    .trim();
+}
+
+function createTimelineItem(input: {
+  description: string;
+  id: string;
+  label: string;
+  sortKey?: string;
+  status: MockTimelineItem['status'];
+  time: string;
+  title: string;
+  type: MockTimelineItem['type'];
+}): MockTimelineItem {
+  return {
+    description: input.description,
+    id: input.id,
+    label: input.label,
+    sortKey: input.sortKey,
+    status: input.status,
+    time: input.time,
+    title: input.title,
+    type: input.type
+  };
+}
+
+type TimelineEntry = {
+  item: MockTimelineItem;
+  sortKey: string;
+};
+
+function createTimelineEntry(
+  input: Parameters<typeof createTimelineItem>[0] & { sortKey: string }
+): TimelineEntry {
+  return {
+    item: createTimelineItem(input),
+    sortKey: input.sortKey
+  };
+}
+
+function toTimelineItems(entries: TimelineEntry[]) {
+  return entries
+    .sort((left, right) =>
+      left.sortKey === right.sortKey
+        ? left.item.id.localeCompare(right.item.id)
+        : left.sortKey.localeCompare(right.sortKey)
+    )
+    .map((entry) => entry.item);
+}
+
+export function buildTimelineItemsFromEvents(events: SessionEventEnvelope[]) {
+  const items: TimelineEntry[] = [];
+  const assistantItems = new Map<string, MockTimelineItem>();
+
+  for (const envelope of events) {
+    const time = formatTimestamp(envelope.createdAt);
+
+    switch (envelope.event.type) {
+      case 'message.created': {
+        const { message } = envelope.event;
+
+        if (message.role === 'assistant') {
+          const item = createTimelineEntry({
+            description: '',
+            id: message.id,
+            label: 'Assistant',
+            status: 'active',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: 'Assistant 正在响应',
+            type: 'message'
+          });
+
+          assistantItems.set(message.id, item.item);
+          items.push(item);
+          break;
+        }
+
+        items.push(
+          createTimelineEntry({
+            description: getMessageBodyText(message) || '无消息内容',
+            id: message.id,
+            label:
+              message.role === 'user'
+                ? 'User'
+                : message.role === 'tool'
+                  ? 'Tool'
+                  : 'Message',
+            status: message.role === 'tool' ? 'success' : 'info',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title:
+              message.role === 'user'
+                ? '用户消息'
+                : message.role === 'tool'
+                  ? '工具结果'
+                  : '消息创建',
+            type: 'message'
+          })
+        );
+        break;
+      }
+      case 'message.delta': {
+        const assistantItem = assistantItems.get(envelope.event.messageId);
+
+        if (assistantItem) {
+          assistantItem.description += envelope.event.delta;
+        }
+
+        break;
+      }
+      case 'message.completed': {
+        const assistantItem = assistantItems.get(envelope.event.messageId);
+
+        if (assistantItem) {
+          assistantItem.status = 'success';
+          assistantItem.title = 'Assistant 响应完成';
+        }
+
+        break;
+      }
+      case 'tool.pending':
+        items.push(
+          createTimelineEntry({
+            description: `等待审批 ${envelope.event.toolCall.toolName}`,
+            id: envelope.event.toolCall.id,
+            label: 'Approval',
+            status: 'warning',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: '工具等待审批',
+            type: 'approval'
+          })
+        );
+        break;
+      case 'approval.created':
+        items.push(
+          createTimelineEntry({
+            description: `审批类型：${envelope.event.approval.kind}`,
+            id: envelope.event.approval.id,
+            label: 'Approval',
+            status: 'warning',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: '审批已创建',
+            type: 'approval'
+          })
+        );
+        break;
+      case 'approval.resolved':
+        items.push(
+          createTimelineEntry({
+            description: `审批结果：${envelope.event.decision}`,
+            id: envelope.event.approvalId,
+            label: 'Approval',
+            status:
+              envelope.event.decision === 'approved' ? 'success' : 'warning',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: '审批已处理',
+            type: 'approval'
+          })
+        );
+        break;
+      case 'tool.running':
+        items.push(
+          createTimelineEntry({
+            description: `工具调用 ${envelope.event.toolCallId} 正在执行`,
+            id: envelope.event.toolCallId,
+            label: 'Tool',
+            status: 'active',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: '工具执行中',
+            type: 'tool'
+          })
+        );
+        break;
+      case 'tool.completed':
+        items.push(
+          createTimelineEntry({
+            description: `工具 ${envelope.event.toolCall.toolName} 已完成`,
+            id: envelope.event.toolCall.id,
+            label: 'Tool',
+            status: 'success',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: '工具执行完成',
+            type: 'tool'
+          })
+        );
+        break;
+      case 'tool.failed':
+        items.push(
+          createTimelineEntry({
+            description: envelope.event.error,
+            id: envelope.event.toolCallId,
+            label: 'Tool',
+            status: 'error',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: '工具执行失败',
+            type: 'error'
+          })
+        );
+        break;
+      case 'session.failed':
+        items.push(
+          createTimelineEntry({
+            description: envelope.event.error,
+            id: `${envelope.sequenceNo}`,
+            label: 'Session',
+            status: 'error',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: 'Session 失败',
+            type: 'error'
+          })
+        );
+        break;
+      case 'session.resumable':
+        items.push(
+          createTimelineEntry({
+            description: '会话已保存 checkpoint，可在审批后恢复。',
+            id: `${envelope.sequenceNo}`,
+            label: 'Session',
+            status: 'warning',
+            sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
+            time,
+            title: 'Session 可恢复',
+            type: 'result'
+          })
+        );
+        break;
+      case 'session.updated':
+        break;
+    }
+  }
+
+  return toTimelineItems(items);
+}
+
+export function buildTimelineItemsFromMessages(messages: MessageDto[]) {
+  return toTimelineItems(
+    messages.map((message, index) =>
+      createTimelineEntry({
+        description: getMessageBodyText(message) || '无消息内容',
+        id: message.id,
+        label:
+          message.role === 'assistant'
+            ? 'Assistant'
+            : message.role === 'user'
+              ? 'User'
+              : message.role === 'tool'
+                ? 'Tool'
+                : 'Message',
+        status:
+          message.role === 'assistant' || message.role === 'tool'
+            ? 'success'
+            : 'info',
+        sortKey: `${message.createdAt}:${String(index).padStart(8, '0')}`,
+        time: formatTimestamp(message.createdAt),
+        title:
+          message.role === 'assistant'
+            ? 'Assistant 响应完成'
+            : message.role === 'user'
+              ? '用户消息'
+              : message.role === 'tool'
+                ? '工具结果'
+                : '消息创建',
+        type: 'message'
+      })
+    )
+  );
+}
+
+export function mergeTimelineItems(
+  persistedMessages: MockTimelineItem[],
+  liveEvents: MockTimelineItem[]
+) {
+  const merged = new Map<string, MockTimelineItem>();
+
+  for (const item of persistedMessages) {
+    merged.set(item.id, item);
+  }
+
+  for (const item of liveEvents) {
+    merged.set(item.id, item);
+  }
+
+  return [...merged.values()].sort((left, right) => {
+    const leftKey = left.sortKey ?? left.time;
+    const rightKey = right.sortKey ?? right.time;
+
+    if (leftKey === rightKey) {
+      return left.id.localeCompare(right.id);
+    }
+
+    return leftKey.localeCompare(rightKey);
   });
 }
 
@@ -198,7 +520,9 @@ export function buildSessionView(
     updatedAt: formatTimestamp(session.updatedAt),
     workspaceId: session.workspaceId,
     composerHint:
-      'Day 2 仅接通 workspace/session CRUD，消息发送将在后续阶段接入。',
+      session.status === 'waiting_approval'
+        ? '当前会话正在等待审批，处理完成后会继续流式更新。'
+        : '消息已经接通真实后端，回答和工具事件会通过 SSE 持续推送。',
     composerValue: ''
   };
 }

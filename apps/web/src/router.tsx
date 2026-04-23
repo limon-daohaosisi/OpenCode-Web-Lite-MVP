@@ -22,14 +22,19 @@ import {
   createWorkspace,
   getSession,
   getWorkspaceTree,
+  listMessages,
   listSessions,
   listWorkspaces,
-  resumeSession
+  resumeSession,
+  submitSessionMessage
 } from './lib/api';
 import {
+  buildTimelineItemsFromEvents,
+  buildTimelineItemsFromMessages,
   buildSessionView,
   buildWorkspaceDetailPane,
   buildWorkspaceTree,
+  mergeTimelineItems,
   formatSessionTimestamp
 } from './lib/session-view';
 
@@ -215,7 +220,7 @@ function EmptyWorkspaceState() {
 function WorkspaceScreen(props: { sessionId?: string; workspaceId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const stream = useSessionStream();
+  const stream = useSessionStream(props.sessionId, props.workspaceId);
   const workspaceListQuery = useQuery({
     queryFn: listWorkspaces,
     queryKey: ['workspaces']
@@ -240,6 +245,11 @@ function WorkspaceScreen(props: { sessionId?: string; workspaceId: string }) {
     queryFn: () => resumeSession(props.sessionId!),
     queryKey: ['resume-session', props.sessionId]
   });
+  const messagesQuery = useQuery({
+    enabled: Boolean(props.sessionId),
+    queryFn: () => listMessages(props.sessionId!),
+    queryKey: ['messages', props.sessionId]
+  });
   const createSessionMutation = useMutation({
     mutationFn: (input: { goalText: string; title?: string }) =>
       createSession({
@@ -259,6 +269,44 @@ function WorkspaceScreen(props: { sessionId?: string; workspaceId: string }) {
           workspaceId: props.workspaceId
         },
         to: '/workspace/$workspaceId/session/$sessionId'
+      });
+    }
+  });
+  const submitMessageMutation = useMutation({
+    mutationFn: (content: string) => {
+      if (!props.sessionId) {
+        throw new Error('当前还没有选中的 session');
+      }
+
+      return submitSessionMessage(props.sessionId, { content });
+    },
+    onSuccess: async (response) => {
+      if (!props.sessionId) {
+        return;
+      }
+
+      queryClient.setQueryData(['messages', props.sessionId], (current) => {
+        const currentMessages = Array.isArray(current) ? current : [];
+
+        return currentMessages.some(
+          (message) =>
+            typeof message === 'object' &&
+            message !== null &&
+            'id' in message &&
+            message.id === response.message.id
+        )
+          ? currentMessages
+          : [...currentMessages, response.message];
+      });
+
+      await queryClient.invalidateQueries({
+        queryKey: ['session', props.sessionId]
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['resume-session', props.sessionId]
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ['sessions', props.workspaceId]
       });
     }
   });
@@ -314,9 +362,25 @@ function WorkspaceScreen(props: { sessionId?: string; workspaceId: string }) {
   const currentSessionView = currentSession
     ? buildSessionView(currentSession, fileTree, resumeQuery.data)
     : null;
+  const liveTimeline = buildTimelineItemsFromEvents(stream.events);
+  const persistedMessageTimeline = buildTimelineItemsFromMessages(
+    messagesQuery.data ?? []
+  );
   const detailPaneData =
     currentSessionView?.detailPane ??
     buildWorkspaceDetailPane(workspace, fileTree);
+  const mergedTimeline = mergeTimelineItems(
+    persistedMessageTimeline,
+    liveTimeline
+  );
+  const timelineItems =
+    mergedTimeline.length > 0
+      ? mergedTimeline
+      : (currentSessionView?.timeline ?? []);
+  const isComposerDisabled =
+    !props.sessionId ||
+    submitMessageMutation.isPending ||
+    currentSession?.status === 'waiting_approval';
 
   return (
     <div className="min-h-screen px-4 py-4 md:px-6">
@@ -395,10 +459,18 @@ function WorkspaceScreen(props: { sessionId?: string; workspaceId: string }) {
                   </div>
                 </div>
 
-                <TimelinePanel items={currentSessionView.timeline} />
+                <TimelinePanel items={timelineItems} />
+                {submitMessageMutation.isError ? (
+                  <p className="mt-4 text-sm text-red-700">
+                    {getErrorMessage(submitMessageMutation.error)}
+                  </p>
+                ) : null}
                 <Composer
                   defaultValue={currentSessionView.composerValue}
+                  disabled={isComposerDisabled}
                   hint={currentSessionView.composerHint}
+                  isSubmitting={submitMessageMutation.isPending}
+                  onSubmit={(content) => submitMessageMutation.mutate(content)}
                 />
               </section>
             </>

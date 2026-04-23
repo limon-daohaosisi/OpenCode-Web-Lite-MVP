@@ -1,15 +1,23 @@
-import { randomUUID } from 'node:crypto';
 import type {
   CreateSessionInput,
-  MessageDto,
   ResumeSessionDto,
+  SessionCheckpoint,
   SessionDto
 } from '@opencode/shared';
-import { sessionRepository } from '../repositories/session-repository.js';
-import { workspaceRepository } from '../repositories/workspace-repository.js';
-import { ServiceError } from './service-error.js';
+import type { SessionStatus } from '@opencode/shared';
+import { randomUUID } from 'node:crypto';
+import { stringifyJsonValue } from '../../lib/json.js';
+import { ServiceError } from '../../lib/service-error.js';
+import { sessionRepository } from '../../repositories/session-repository.js';
+import { workspaceRepository } from '../../repositories/workspace-repository.js';
 
-const messages = new Map<string, MessageDto[]>();
+type UpdateSessionRuntimeStateInput = {
+  currentTaskId?: null | string;
+  lastCheckpoint?: null | SessionCheckpoint | string;
+  lastErrorText?: null | string;
+  sessionId: string;
+  status?: SessionStatus;
+};
 
 function buildSessionTitle(goalText: string, title?: string): string {
   const trimmedTitle = title?.trim();
@@ -31,18 +39,20 @@ function buildSessionTitle(goalText: string, title?: string): string {
     : `${fallbackTitle.slice(0, 57).trimEnd()}...`;
 }
 
-export function buildAssistantMessage(
-  sessionId: string,
-  content: string
-): MessageDto {
-  return {
-    content: [{ text: content, type: 'text' }],
-    createdAt: new Date().toISOString(),
-    id: `msg-${Date.now()}`,
-    kind: 'message',
-    role: 'assistant',
-    sessionId
-  };
+function serializeCheckpoint(
+  checkpoint: null | SessionCheckpoint | string | undefined
+) {
+  if (checkpoint === undefined) {
+    return undefined;
+  }
+
+  if (checkpoint === null) {
+    return null;
+  }
+
+  return typeof checkpoint === 'string'
+    ? checkpoint
+    : stringifyJsonValue(checkpoint);
 }
 
 export const sessionService = {
@@ -63,17 +73,11 @@ export const sessionService = {
       updatedAt: now,
       workspaceId: input.workspaceId
     });
-
-    messages.set(session.id, []);
     return session;
   },
 
   getSession(sessionId: string) {
     return sessionRepository.getById(sessionId);
-  },
-
-  listMessages(sessionId: string) {
-    return messages.get(sessionId) ?? [];
   },
 
   listSessions(workspaceId: string) {
@@ -94,5 +98,18 @@ export const sessionService = {
       checkpoint: session.lastCheckpointJson,
       session
     };
+  },
+
+  updateSessionRuntimeState(
+    input: UpdateSessionRuntimeStateInput
+  ): SessionDto | null {
+    return sessionRepository.updateResumeState({
+      currentTaskId: input.currentTaskId,
+      id: input.sessionId,
+      lastCheckpointJson: serializeCheckpoint(input.lastCheckpoint),
+      lastErrorText: input.lastErrorText,
+      status: input.status,
+      updatedAt: new Date().toISOString()
+    });
   }
 };

@@ -1,11 +1,48 @@
 import { streamSSE } from 'hono/streaming';
 import { AgentLoop } from '../../agent/loop.js';
+import {
+  parseLastEventId,
+  writeEnvelope
+} from '../../internal/realtime/sse.js';
+import { sessionStreamHub } from '../../internal/realtime/session-stream-hub.js';
 import { appFactory } from '../../lib/factory.js';
+import { isServiceError } from '../../lib/service-error.js';
 import { createValidator } from '../../lib/validator.js';
-import { sessionService } from '../../services/session-service.js';
+import { sessionEventService } from '../../services/session/session-event-service.js';
+import { sessionService } from '../../services/session/session-service.js';
 import { AgentSchemas } from './agent.schema.js';
 
 const agentLoop = new AgentLoop();
+const KEEPALIVE_INTERVAL_MS = 15_000;
+
+function isExpectedStreamAbort(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message === 'Session stream aborted.' ||
+      error.message === 'SSE stream aborted.')
+  );
+}
+
+function waitForKeepalive(signal: AbortSignal) {
+  return new Promise<null>((resolve, reject) => {
+    const abortHandler = () => {
+      clearTimeout(timer);
+      reject(new Error('SSE stream aborted.'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abortHandler);
+
+      if (signal.aborted) {
+        reject(new Error('SSE stream aborted.'));
+        return;
+      }
+
+      resolve(null);
+    }, KEEPALIVE_INTERVAL_MS);
+
+    signal.addEventListener('abort', abortHandler, { once: true });
+  });
+}
 
 export const submitMessage = appFactory.createHandlers(
   createValidator.param(AgentSchemas.submitMessage.param),
@@ -13,12 +50,21 @@ export const submitMessage = appFactory.createHandlers(
   async (c) => {
     const { sessionId } = c.req.valid('param');
     const payload = c.req.valid('json');
-    const assistantMessage = await agentLoop.submitUserMessage({
-      content: payload.content,
-      sessionId
-    });
 
-    return c.json({ data: assistantMessage }, 202);
+    try {
+      const response = await agentLoop.submitUserMessage({
+        content: payload.content,
+        sessionId
+      });
+
+      return c.json({ data: response }, 202);
+    } catch (error) {
+      if (isServiceError(error)) {
+        return c.json({ error: error.message }, error.status);
+      }
+
+      throw error;
+    }
   }
 );
 
@@ -28,24 +74,69 @@ export const stream = appFactory.createHandlers(
     const { sessionId } = c.req.valid('param');
     const session = sessionService.getSession(sessionId);
 
-    return streamSSE(c, async (streamWriter) => {
-      await streamWriter.writeSSE({
-        data: JSON.stringify({
-          sessionId,
-          timestamp: new Date().toISOString(),
-          type: 'session.updated'
-        }),
-        event: 'session.updated'
-      });
+    if (!session) {
+      return c.json({ error: 'Session not found' }, 404);
+    }
 
-      await streamWriter.writeSSE({
-        data: JSON.stringify({
-          message: `Connected to ${session?.title ?? 'unknown session'}`,
+    const signal = c.req.raw.signal;
+    const lastEventId = parseLastEventId(c.req.header('Last-Event-ID'));
+
+    return streamSSE(c, async (streamWriter) => {
+      const subscription = sessionStreamHub.subscribe(sessionId);
+      let latestSequenceNo = lastEventId;
+
+      try {
+        const replayEvents = sessionEventService.listAfterSequence(
           sessionId,
-          type: 'message.delta'
-        }),
-        event: 'message.delta'
-      });
+          lastEventId
+        );
+
+        for (const envelope of replayEvents) {
+          await writeEnvelope(streamWriter, envelope);
+          latestSequenceNo = envelope.sequenceNo;
+        }
+
+        while (!signal.aborted) {
+          const pending = subscription
+            .drain()
+            .filter((envelope) => envelope.sequenceNo > latestSequenceNo);
+
+          if (pending.length > 0) {
+            for (const envelope of pending) {
+              await writeEnvelope(streamWriter, envelope);
+              latestSequenceNo = envelope.sequenceNo;
+            }
+
+            continue;
+          }
+
+          const nextEvent = await Promise.race([
+            subscription.next(signal),
+            waitForKeepalive(signal)
+          ]);
+
+          if (nextEvent === null) {
+            await streamWriter.writeSSE({
+              data: JSON.stringify({ timestamp: new Date().toISOString() }),
+              event: 'keepalive'
+            });
+            continue;
+          }
+
+          if (nextEvent.sequenceNo <= latestSequenceNo) {
+            continue;
+          }
+
+          await writeEnvelope(streamWriter, nextEvent);
+          latestSequenceNo = nextEvent.sequenceNo;
+        }
+      } catch (error) {
+        if (!isExpectedStreamAbort(error)) {
+          throw error;
+        }
+      } finally {
+        subscription.unsubscribe();
+      }
     });
   }
 );

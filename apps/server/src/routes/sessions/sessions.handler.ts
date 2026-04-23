@@ -1,7 +1,8 @@
 import { appFactory } from '../../lib/factory.js';
+import { isServiceError } from '../../lib/service-error.js';
 import { createValidator } from '../../lib/validator.js';
-import { isServiceError } from '../../services/service-error.js';
-import { sessionService } from '../../services/session-service.js';
+import { messageService } from '../../services/session/message-service.js';
+import { sessionService } from '../../services/session/session-service.js';
 import { SessionsSchemas } from './sessions.schema.js';
 
 export const list = appFactory.createHandlers(
@@ -48,7 +49,12 @@ export const listMessages = appFactory.createHandlers(
   createValidator.param(SessionsSchemas.byId.param),
   (c) => {
     const { sessionId } = c.req.valid('param');
-    return c.json({ data: sessionService.listMessages(sessionId) });
+
+    if (!sessionService.getSession(sessionId)) {
+      return c.json({ error: 'Session not found' }, 404);
+    }
+
+    return c.json({ data: messageService.listMessages(sessionId) });
   }
 );
 

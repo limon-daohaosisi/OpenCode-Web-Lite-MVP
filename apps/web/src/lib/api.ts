@@ -1,8 +1,11 @@
 import type {
   CreateSessionInput,
   CreateWorkspaceInput,
+  MessageDto,
   ResumeSessionDto,
   SessionDto,
+  SubmitSessionMessageInput,
+  SubmitSessionMessageResponse,
   WorkspaceDto
 } from '@opencode/shared';
 
@@ -103,8 +106,46 @@ export function getSession(sessionId: string) {
   return fetchData<SessionDto>(`/sessions/${sessionId}`);
 }
 
+export function listMessages(sessionId: string) {
+  return fetchData<MessageDto[]>(`/sessions/${sessionId}/messages`);
+}
+
 export function resumeSession(sessionId: string) {
   return fetchData<ResumeSessionDto>(`/sessions/${sessionId}/resume`, {
     method: 'POST'
   });
+}
+
+export function submitSessionMessage(
+  sessionId: string,
+  input: SubmitSessionMessageInput
+) {
+  return fetchData<SubmitSessionMessageResponse>(
+    `/sessions/${sessionId}/messages`,
+    {
+      body: JSON.stringify(input),
+      headers: {
+        'content-type': 'application/json'
+      },
+      method: 'POST'
+    }
+  );
+}
+
+export function approveApproval(approvalId: string) {
+  return fetchData<{ approvalId: string } | { approval: unknown }>(
+    `/approvals/${approvalId}/approve`,
+    {
+      method: 'POST'
+    }
+  );
+}
+
+export function rejectApproval(approvalId: string) {
+  return fetchData<{ approvalId: string } | { approval: unknown }>(
+    `/approvals/${approvalId}/reject`,
+    {
+      method: 'POST'
+    }
+  );
 }

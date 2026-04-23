@@ -1,7 +1,7 @@
 import { appFactory } from '../../lib/factory.js';
+import { isServiceError } from '../../lib/service-error.js';
 import { createValidator } from '../../lib/validator.js';
-import { isServiceError } from '../../services/service-error.js';
-import { workspaceService } from '../../services/workspace-service.js';
+import { workspaceService } from '../../services/workspace/workspace-service.js';
 import { WorkspacesSchemas } from './workspaces.schema.js';
 
 export const list = appFactory.createHandlers((c) =>

@@ -25,3 +25,11 @@ export const createSessionInputSchema = z.object({
 });
 
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
+
+export const submitSessionMessageInputSchema = z.object({
+  content: z.string().trim().min(1)
+});
+
+export type SubmitSessionMessageInput = z.infer<
+  typeof submitSessionMessageInputSchema
+>;

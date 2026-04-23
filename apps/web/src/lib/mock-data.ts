@@ -23,6 +23,7 @@ export type MockTimelineItem = {
   description: string;
   id: string;
   label: string;
+  sortKey?: string;
   status: 'info' | 'active' | 'success' | 'warning' | 'error';
   time: string;
   title: string;

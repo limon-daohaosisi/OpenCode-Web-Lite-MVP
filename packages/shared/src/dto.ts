@@ -11,7 +11,20 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export type MessagePart =
   | { text: string; type: 'text' }
-  | { content: unknown; toolName: string; type: 'tool_result' };
+  | { text: string; type: 'reasoning' }
+  | { content: unknown; toolName: string; type: 'tool_result' }
+  | {
+      files: Array<{
+        change: 'create' | 'delete' | 'update';
+        path: string;
+      }>;
+      type: 'patch';
+    }
+  | {
+      source: 'assistant' | 'compaction' | 'system';
+      text: string;
+      type: 'summary';
+    };
 
 export type WorkspaceDto = {
   createdAt: string;
@@ -34,7 +47,14 @@ export type SessionCheckpoint = {
     | 'completed';
   note?: string;
   planId?: string;
+  provider?: {
+    openai?: {
+      callId?: string;
+      previousResponseId?: string;
+    };
+  };
   taskId?: string;
+  toolCallId?: string;
   updatedAt: string;
 };
 
@@ -68,12 +88,17 @@ export type MessageDto = {
   sessionId: string;
 };
 
+export type SubmitSessionMessageResponse = {
+  accepted: true;
+  message: MessageDto;
+};
+
 export type ToolCallDto = {
   createdAt: string;
   errorText?: string;
   id: string;
   input: Record<string, unknown>;
-  messageId: string;
+  messageId?: string;
   result?: Record<string, unknown>;
   sessionId: string;
   status: ToolCallStatus;
@@ -87,6 +112,7 @@ export type ApprovalDto = {
   id: string;
   kind: 'write_file' | 'run_command';
   payload: Record<string, unknown>;
+  sessionId: string;
   status: ApprovalStatus;
   toolCallId: string;
 };

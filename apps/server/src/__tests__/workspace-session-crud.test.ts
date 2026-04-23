@@ -1,60 +1,18 @@
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test, { after } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import test, { beforeEach } from 'node:test';
+import { dbTestContext, resetTestDatabase } from './db-test-context.js';
+import { parseJson } from './server-test-helpers.js';
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(currentDir, '../../../..');
-const testRoot = mkdtempSync(path.join(tmpdir(), 'opencode-server-test-'));
-const databasePath = path.join(testRoot, 'opencode-test.db');
-const workspaceRoot = path.join(testRoot, 'workspace');
+const { app, environment } = dbTestContext;
 
-mkdirSync(path.join(workspaceRoot, 'src'), { recursive: true });
-writeFileSync(
-  path.join(workspaceRoot, 'package.json'),
-  '{"name":"workspace-test"}\n'
-);
-writeFileSync(
-  path.join(workspaceRoot, 'src', 'index.ts'),
-  'export const ok = true;\n'
-);
-
-process.env.DATABASE_PATH = databasePath;
-
-const migrationSql = readFileSync(
-  path.join(repoRoot, 'packages/db/migrations/20260330144844_init_schema.sql'),
-  'utf8'
-);
-
-const [{ app }, { sqlite }] = await Promise.all([
-  import('../app.js'),
-  import('../db/client.js')
-]);
-
-sqlite.exec(migrationSql);
-
-after(() => {
-  sqlite.close();
-  rmSync(testRoot, { force: true, recursive: true });
+beforeEach(() => {
+  resetTestDatabase();
 });
-
-async function parseJson<T>(
-  response: Response
-): Promise<{ data?: T; error?: string }> {
-  return (await response.json()) as { data?: T; error?: string };
-}
 
 test('workspace + session CRUD smoke path persists in sqlite', async () => {
   const createWorkspaceResponse = await app.request('/api/workspaces', {
-    body: JSON.stringify({ rootPath: workspaceRoot }),
+    body: JSON.stringify({ rootPath: environment.workspaceRoot }),
     headers: {
       'content-type': 'application/json'
     },
@@ -73,11 +31,14 @@ test('workspace + session CRUD smoke path persists in sqlite', async () => {
   }>(createWorkspaceResponse);
 
   assert.ok(createdWorkspace.data);
-  assert.equal(createdWorkspace.data.rootPath, workspaceRoot);
-  assert.equal(createdWorkspace.data.name, path.basename(workspaceRoot));
+  assert.equal(createdWorkspace.data.rootPath, environment.workspaceRoot);
+  assert.equal(
+    createdWorkspace.data.name,
+    path.basename(environment.workspaceRoot)
+  );
 
   const duplicateWorkspaceResponse = await app.request('/api/workspaces', {
-    body: JSON.stringify({ rootPath: workspaceRoot }),
+    body: JSON.stringify({ rootPath: environment.workspaceRoot }),
     headers: {
       'content-type': 'application/json'
     },
@@ -92,7 +53,7 @@ test('workspace + session CRUD smoke path persists in sqlite', async () => {
   }>(duplicateWorkspaceResponse);
 
   assert.equal(duplicateWorkspace.data?.id, createdWorkspace.data.id);
-  assert.equal(duplicateWorkspace.data?.rootPath, workspaceRoot);
+  assert.equal(duplicateWorkspace.data?.rootPath, environment.workspaceRoot);
 
   const listWorkspacesResponse = await app.request('/api/workspaces');
   assert.equal(listWorkspacesResponse.status, 200);
@@ -117,7 +78,10 @@ test('workspace + session CRUD smoke path persists in sqlite', async () => {
     }>
   >(treeResponse);
 
-  assert.equal(treePayload.data?.[0]?.name, path.basename(workspaceRoot));
+  assert.equal(
+    treePayload.data?.[0]?.name,
+    path.basename(environment.workspaceRoot)
+  );
   assert.ok(
     treePayload.data?.[0]?.children?.some((node) => node.name === 'src')
   );

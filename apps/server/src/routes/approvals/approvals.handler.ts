@@ -1,31 +1,51 @@
+import { AgentLoop } from '../../agent/loop.js';
 import { appFactory } from '../../lib/factory.js';
+import { isServiceError } from '../../lib/service-error.js';
 import { createValidator } from '../../lib/validator.js';
 import { ApprovalsSchemas } from './approvals.schema.js';
 
+const agentLoop = new AgentLoop();
+
 export const approve = appFactory.createHandlers(
   createValidator.param(ApprovalsSchemas.decision.param),
-  (c) => {
+  async (c) => {
     const { approvalId } = c.req.valid('param');
 
-    return c.json({
-      data: {
+    try {
+      const response = await agentLoop.resolveApproval({
         approvalId,
         decision: 'approved'
+      });
+
+      return c.json({ data: response });
+    } catch (error) {
+      if (isServiceError(error)) {
+        return c.json({ error: error.message }, error.status);
       }
-    });
+
+      throw error;
+    }
   }
 );
 
 export const reject = appFactory.createHandlers(
   createValidator.param(ApprovalsSchemas.decision.param),
-  (c) => {
+  async (c) => {
     const { approvalId } = c.req.valid('param');
 
-    return c.json({
-      data: {
+    try {
+      const response = await agentLoop.resolveApproval({
         approvalId,
         decision: 'rejected'
+      });
+
+      return c.json({ data: response });
+    } catch (error) {
+      if (isServiceError(error)) {
+        return c.json({ error: error.message }, error.status);
       }
-    });
+
+      throw error;
+    }
   }
 );

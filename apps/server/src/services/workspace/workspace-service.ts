@@ -2,8 +2,8 @@ import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { CreateWorkspaceInput, WorkspaceDto } from '@opencode/shared';
-import { workspaceRepository } from '../repositories/workspace-repository.js';
-import { ServiceError } from './service-error.js';
+import { ServiceError } from '../../lib/service-error.js';
+import { workspaceRepository } from '../../repositories/workspace-repository.js';
 
 type FileTreeNode = {
   children?: FileTreeNode[];

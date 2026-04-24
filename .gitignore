@@ -82,6 +82,7 @@ out
 .nuxt
 dist
 apps/server/data/
+apps/server/apps/
 
 # Gatsby files
 .cache/

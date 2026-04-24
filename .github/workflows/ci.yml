@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Verify
+  build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -31,11 +31,73 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
+
+      - name: Restore node_modules cache
+        id: nm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: nm-${{ runner.os }}-node24-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        if: steps.nm-cache.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
 
       - name: Setup Atlas
         uses: ariga/setup-atlas@v0
+
+      - name: Validate Atlas Schema
+        run: atlas schema inspect --dev-url 'sqlite://dev?mode=memory' --url file://packages/db/schema
+
+      - name: Validate Migration Integrity
+        run: atlas migrate validate --env local
+        working-directory: packages/db
+
+      - name: Apply Database Migrations
+        run: DATABASE_URL='sqlite:///tmp/opencode-ci.db' pnpm db:apply
+
+      - name: Verify ORM Schema Sync
+        run: |
+          DATABASE_PATH='/tmp/opencode-ci.db' pnpm db:sync
+          git diff --exit-code -- packages/orm/src/schema.ts packages/orm/src/relations.ts
+
+      - name: Build
+        run: pnpm build
+
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Restore node_modules cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            node_modules
+            apps/*/node_modules
+            packages/*/node_modules
+          key: nm-${{ runner.os }}-node24-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -49,16 +111,29 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Validate Atlas Schema
-        run: atlas schema inspect --dev-url 'sqlite://dev?mode=memory' --url file://packages/db/schema
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
 
-      - name: Apply Database Migrations
-        run: DATABASE_URL='sqlite:///tmp/opencode-ci.db' pnpm db:apply
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Verify ORM Schema Sync
-        run: |
-          DATABASE_PATH='/tmp/opencode-ci.db' pnpm db:sync
-          git diff --exit-code -- packages/orm/src/schema.ts packages/orm/src/relations.ts
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.0
 
-      - name: Build
-        run: pnpm build
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test

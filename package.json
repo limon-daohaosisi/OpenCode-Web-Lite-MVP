@@ -13,6 +13,7 @@
     "format": "prettier --write --log-level warn \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yaml,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,cjs,json,md,yaml,yml}\"",
     "lint": "pnpm -r --if-present lint",
+    "test": "pnpm --filter @opencode/server test",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {

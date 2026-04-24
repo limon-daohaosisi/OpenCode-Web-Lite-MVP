@@ -132,17 +132,11 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Restore node_modules cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            node_modules
-            apps/*/node_modules
-            packages/*/node_modules
-          key: nm-${{ runner.os }}-node24-${{ hashFiles('pnpm-lock.yaml') }}
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Rebuild native modules
+        run: pnpm rebuild better-sqlite3
 
       - name: Test
         run: pnpm test

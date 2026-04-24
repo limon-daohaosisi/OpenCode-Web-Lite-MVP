@@ -4,6 +4,7 @@
   "scripts": {
     "apply": "atlas migrate apply --env local",
     "diff": "atlas migrate diff",
+    "lint": "atlas schema inspect --dev-url 'sqlite://dev?mode=memory' --url file://schema",
     "status": "atlas migrate status --env local"
   }
 }

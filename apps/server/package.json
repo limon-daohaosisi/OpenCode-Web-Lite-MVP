@@ -15,7 +15,7 @@
     "@opencode/agent-core": "workspace:*",
     "@opencode/orm": "workspace:*",
     "@opencode/shared": "workspace:*",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.44.5",
     "hono": "^4.7.2",
     "openai": "^6.34.0",

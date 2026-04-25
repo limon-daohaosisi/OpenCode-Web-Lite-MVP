@@ -10,7 +10,11 @@ rmSync(metaDir, { force: true, recursive: true });
 for (const file of ['schema.ts', 'relations.ts']) {
   const path = resolve(srcDir, file);
   const content = readFileSync(path, 'utf8');
-  const fixed = content.replace(/from '\.\/(\w+)'/g, "from './$1.js'");
+  const fixed = content.replace(
+    /from\s+['"](\.\/[^'"]+)['"]/g,
+    (_, specifier) =>
+      `from '${specifier.endsWith('.js') ? specifier : `${specifier}.js`}'`
+  );
   writeFileSync(path, fixed);
 }
 

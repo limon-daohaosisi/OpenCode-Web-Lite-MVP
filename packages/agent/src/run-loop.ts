@@ -1,6 +1,5 @@
 import type { ResponseInputItem } from 'openai/resources/responses/responses';
 import {
-  sessionProcessor,
   type ProcessTurnInput,
   type ProcessorResult,
   type SessionProcessor
@@ -25,7 +24,7 @@ export type RunLoopResult =
 
 export class RunLoop {
   constructor(
-    private readonly processor: SessionProcessor = sessionProcessor
+    private readonly processor: Pick<SessionProcessor, 'processTurn'>
   ) {}
 
   async run(input: RunLoopInput): Promise<RunLoopResult> {
@@ -53,5 +52,3 @@ export class RunLoop {
     }
   }
 }
-
-export const runLoop = new RunLoop();

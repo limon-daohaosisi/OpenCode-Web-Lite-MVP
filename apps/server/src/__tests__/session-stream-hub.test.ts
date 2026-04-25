@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sessionStreamHub } from '../internal/realtime/session-stream-hub.js';
+import { sessionStreamHub } from '../services/session/stream-hub.js';
 
 function createEnvelope(sessionId: string, sequenceNo: number) {
   return {

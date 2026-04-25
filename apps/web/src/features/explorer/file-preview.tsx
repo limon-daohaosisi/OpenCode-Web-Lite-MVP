@@ -7,7 +7,7 @@ export function FilePreview() {
             Preview
           </p>
           <h3 className="font-medium text-ink">
-            apps/server/src/tools/run-command.ts
+            packages/agent/src/tools/run-command.ts
           </h3>
         </div>
         <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-500">
@@ -15,8 +15,13 @@ export function FilePreview() {
         </span>
       </div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-2xl bg-white p-4 text-sm leading-6 text-slate-700">
-        {`export async function runCommandTool() {
-  // TODO: guard interactive commands, add timeout, and persist tool results.
+        {`export const runCommandToolDefinition = {
+  name: 'run_command',
+  description: 'Run a non-interactive shell command in the workspace.'
+}
+
+export async function runCommandTool() {
+  // Guard interactive commands, enforce timeout, and stream tool output.
 }`}
       </pre>
     </div>

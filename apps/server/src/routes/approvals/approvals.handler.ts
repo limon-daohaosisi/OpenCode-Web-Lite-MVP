@@ -1,10 +1,8 @@
-import { AgentLoop } from '../../agent/loop.js';
 import { appFactory } from '../../lib/factory.js';
 import { isServiceError } from '../../lib/service-error.js';
+import { sessionPromptService } from '../../services/session/prompt-service.js';
 import { createValidator } from '../../lib/validator.js';
 import { ApprovalsSchemas } from './approvals.schema.js';
-
-const agentLoop = new AgentLoop();
 
 export const approve = appFactory.createHandlers(
   createValidator.param(ApprovalsSchemas.decision.param),
@@ -12,7 +10,7 @@ export const approve = appFactory.createHandlers(
     const { approvalId } = c.req.valid('param');
 
     try {
-      const response = await agentLoop.resolveApproval({
+      const response = await sessionPromptService.resolveApproval({
         approvalId,
         decision: 'approved'
       });
@@ -34,7 +32,7 @@ export const reject = appFactory.createHandlers(
     const { approvalId } = c.req.valid('param');
 
     try {
-      const response = await agentLoop.resolveApproval({
+      const response = await sessionPromptService.resolveApproval({
         approvalId,
         decision: 'rejected'
       });

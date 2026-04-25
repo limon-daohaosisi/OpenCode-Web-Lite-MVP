@@ -6,22 +6,22 @@ process.env.DATABASE_PATH = environment.databasePath;
 
 const [
   { app },
-  { buildSessionCheckpoint },
   { sqlite },
   { ServiceError },
+  { buildSessionCheckpoint },
   { messageService },
   { sessionEventService },
   { sessionService },
   { workspaceService }
 ] = await Promise.all([
   import('../app.js'),
-  import('../agent/checkpoint.js'),
   import('../db/client.js'),
   import('../lib/service-error.js'),
+  import('@opencode/agent'),
   import('../services/session/message-service.js'),
-  import('../services/session/session-event-service.js'),
-  import('../services/session/session-service.js'),
-  import('../services/workspace/workspace-service.js')
+  import('../services/session/event-service.js'),
+  import('../services/session/service.js'),
+  import('../services/workspace/service.js')
 ]);
 
 try {

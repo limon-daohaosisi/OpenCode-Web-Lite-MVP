@@ -1,15 +1,45 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { z } from 'zod';
 import { createUnifiedDiff } from './diff.js';
 import { resolveWorkspacePath } from './guards.js';
+import type { ToolDefinition } from './types.js';
 
-type WriteFileInput = {
+export type WriteFileToolInput = {
   content: string;
   path: string;
 };
 
+export const writeFileInputSchema = z
+  .object({
+    content: z.string(),
+    path: z.string().trim().min(1)
+  })
+  .strict();
+
+export const writeFileToolDefinition: ToolDefinition = {
+  description:
+    'Replace a UTF-8 text file inside the current workspace. Requires user approval.',
+  inputSchema: {
+    additionalProperties: false,
+    properties: {
+      content: {
+        description: 'Full next content of the file.',
+        type: 'string'
+      },
+      path: {
+        description: 'Relative path from the workspace root.',
+        type: 'string'
+      }
+    },
+    required: ['path', 'content'],
+    type: 'object'
+  },
+  name: 'write_file'
+};
+
 export async function buildWriteFileApproval(
-  input: WriteFileInput,
+  input: WriteFileToolInput,
   workspaceRoot: string
 ) {
   const absolutePath = resolveWorkspacePath(workspaceRoot, input.path);
@@ -23,7 +53,7 @@ export async function buildWriteFileApproval(
 }
 
 export async function executeWriteFile(
-  input: WriteFileInput,
+  input: WriteFileToolInput,
   workspaceRoot: string
 ) {
   const absolutePath = resolveWorkspacePath(workspaceRoot, input.path);

@@ -1,18 +1,14 @@
 import { streamSSE } from 'hono/streaming';
-import { AgentLoop } from '../../agent/loop.js';
-import {
-  parseLastEventId,
-  writeEnvelope
-} from '../../internal/realtime/sse.js';
-import { sessionStreamHub } from '../../internal/realtime/session-stream-hub.js';
+import { sessionPromptService } from '../../services/session/prompt-service.js';
+import { parseLastEventId, writeEnvelope } from '../../lib/sse.js';
+import { sessionStreamHub } from '../../services/session/stream-hub.js';
 import { appFactory } from '../../lib/factory.js';
 import { isServiceError } from '../../lib/service-error.js';
 import { createValidator } from '../../lib/validator.js';
-import { sessionEventService } from '../../services/session/session-event-service.js';
-import { sessionService } from '../../services/session/session-service.js';
+import { sessionEventService } from '../../services/session/event-service.js';
+import { sessionService } from '../../services/session/service.js';
 import { AgentSchemas } from './agent.schema.js';
 
-const agentLoop = new AgentLoop();
 const KEEPALIVE_INTERVAL_MS = 15_000;
 
 function isExpectedStreamAbort(error: unknown) {
@@ -52,7 +48,7 @@ export const submitMessage = appFactory.createHandlers(
     const payload = c.req.valid('json');
 
     try {
-      const response = await agentLoop.submitUserMessage({
+      const response = await sessionPromptService.prompt({
         content: payload.content,
         sessionId
       });

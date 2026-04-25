@@ -1,5 +1,4 @@
 import type { SessionCheckpoint } from '@opencode/shared';
-import { parseJsonValue } from '../lib/json.js';
 
 type BuildSessionCheckpointInput = {
   approvalId?: string;
@@ -47,5 +46,13 @@ export function getCheckpointPreviousResponseId(
 }
 
 export function parseSessionCheckpoint(raw: null | string | undefined) {
-  return parseJsonValue<SessionCheckpoint | null>(raw, null) ?? undefined;
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    return (JSON.parse(raw) as SessionCheckpoint | null) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }

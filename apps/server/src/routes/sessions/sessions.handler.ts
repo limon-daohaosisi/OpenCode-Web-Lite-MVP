@@ -2,7 +2,7 @@ import { appFactory } from '../../lib/factory.js';
 import { isServiceError } from '../../lib/service-error.js';
 import { createValidator } from '../../lib/validator.js';
 import { messageService } from '../../services/session/message-service.js';
-import { sessionService } from '../../services/session/session-service.js';
+import { sessionService } from '../../services/session/service.js';
 import { SessionsSchemas } from './sessions.schema.js';
 
 export const list = appFactory.createHandlers(

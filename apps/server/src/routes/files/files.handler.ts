@@ -1,6 +1,6 @@
+import { readFileTool } from '@opencode/agent';
 import { appFactory } from '../../lib/factory.js';
 import { createValidator } from '../../lib/validator.js';
-import { readFileTool } from '../../tools/read-file.js';
 import { FilesSchemas } from './files.schema.js';
 
 export const content = appFactory.createHandlers(

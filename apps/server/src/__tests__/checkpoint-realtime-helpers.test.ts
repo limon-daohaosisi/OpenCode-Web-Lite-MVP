@@ -1,12 +1,12 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
 import {
   buildSessionCheckpoint,
   getCheckpointCallId,
   getCheckpointPreviousResponseId,
   parseSessionCheckpoint
-} from '../agent/checkpoint.js';
-import { parseLastEventId, writeEnvelope } from '../internal/realtime/sse.js';
+} from '@opencode/agent';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { parseLastEventId, writeEnvelope } from '../lib/sse.js';
 
 test('checkpoint helpers preserve OpenAI continuation metadata', () => {
   const checkpoint = buildSessionCheckpoint({

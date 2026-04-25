@@ -1,8 +1,15 @@
+import {
+  Lifecycle,
+  SessionProcessor,
+  type RunLoopInput
+} from '@opencode/agent';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { dbTestContext, resetTestDatabase } from './db-test-context.js';
-import { Lifecycle } from '../agent/lifecycle.js';
-import type { RunLoopInput } from '../agent/run-loop.js';
+import {
+  buildLifecycleDeps,
+  buildSessionProcessorDeps
+} from '../wiring/agent.js';
 
 const {
   buildSessionCheckpoint,
@@ -92,11 +99,14 @@ afterEach(() => {
 
 test('Lifecycle maps loop failures to session.failed state', async () => {
   const session = createSession();
-  const lifecycle = new Lifecycle({
-    async run() {
-      throw new Error('loop exploded');
-    }
-  } as never);
+  const lifecycle = new Lifecycle(
+    {
+      async run() {
+        throw new Error('loop exploded');
+      }
+    } as never,
+    buildLifecycleDeps()
+  );
 
   const result = await lifecycle.startPromptRun({
     input: 'Start the run',
@@ -139,11 +149,15 @@ test('Lifecycle continues the model when an approved tool fails during approval 
         };
       }
     } as never,
-    {
-      async executeApprovedTool() {
-        throw new Error('tool exploded');
-      }
-    }
+    buildLifecycleDeps({
+      processor: new SessionProcessor(
+        buildSessionProcessorDeps({
+          async executeApprovedTool() {
+            throw new Error('tool exploded');
+          }
+        })
+      )
+    })
   );
 
   const result = await lifecycle.resumeApprovalRun({
@@ -209,15 +223,18 @@ test('Lifecycle builds a synthetic tool result when approval is rejected', async
   });
   let runInput: unknown;
 
-  const lifecycle = new Lifecycle({
-    async run(input: RunLoopInput) {
-      runInput = input;
-      return {
-        kind: 'completed',
-        previousResponseId: 'resp-next'
-      };
-    }
-  } as never);
+  const lifecycle = new Lifecycle(
+    {
+      async run(input: RunLoopInput) {
+        runInput = input;
+        return {
+          kind: 'completed',
+          previousResponseId: 'resp-next'
+        };
+      }
+    } as never,
+    buildLifecycleDeps()
+  );
 
   const result = await lifecycle.resumeApprovalRun({
     approval,

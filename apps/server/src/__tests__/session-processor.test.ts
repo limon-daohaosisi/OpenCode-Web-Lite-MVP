@@ -1,10 +1,12 @@
+import {
+  SessionProcessor,
+  type ModelResponseStream,
+  type StreamModelResponse
+} from '@opencode/agent';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { dbTestContext, resetTestDatabase } from './db-test-context.js';
-import { SessionProcessor } from '../agent/session-processor.js';
-import type { streamModelResponse } from '../agent/model-client.js';
-
-type StreamModelResponseFn = typeof streamModelResponse;
+import { buildSessionProcessorDeps } from '../wiring/agent.js';
 
 const {
   environment,
@@ -55,19 +57,21 @@ afterEach(() => {
 test('SessionProcessor persists streamed assistant text and completes the turn', async () => {
   const session = createSession();
 
-  const processor = new SessionProcessor({
-    streamModelResponse: (() =>
-      createFakeStream({
-        events: [
-          { delta: 'Hello', type: 'response.output_text.delta' },
-          { delta: ' world', type: 'response.output_text.delta' }
-        ],
-        finalResponse: {
-          id: 'resp-text',
-          output: []
-        }
-      }) as unknown as ReturnType<StreamModelResponseFn>) as StreamModelResponseFn
-  });
+  const processor = new SessionProcessor(
+    buildSessionProcessorDeps({
+      streamModelResponse: (() =>
+        createFakeStream({
+          events: [
+            { delta: 'Hello', type: 'response.output_text.delta' },
+            { delta: ' world', type: 'response.output_text.delta' }
+          ],
+          finalResponse: {
+            id: 'resp-text',
+            output: []
+          }
+        }) as unknown as ModelResponseStream) as StreamModelResponse
+    })
+  );
   const result = await processor.processTurn({
     input: 'Say hello',
     previousResponseId: null,
@@ -106,23 +110,25 @@ test('SessionProcessor persists streamed assistant text and completes the turn',
 test('SessionProcessor auto-executes read_file tools and returns function_call_output input', async () => {
   const session = createSession();
 
-  const processor = new SessionProcessor({
-    streamModelResponse: (() =>
-      createFakeStream({
-        events: [],
-        finalResponse: {
-          id: 'resp-tool',
-          output: [
-            {
-              arguments: JSON.stringify({ path: 'src/index.ts' }),
-              call_id: 'call-read-file',
-              name: 'read_file',
-              type: 'function_call'
-            }
-          ]
-        }
-      }) as unknown as ReturnType<StreamModelResponseFn>) as StreamModelResponseFn
-  });
+  const processor = new SessionProcessor(
+    buildSessionProcessorDeps({
+      streamModelResponse: (() =>
+        createFakeStream({
+          events: [],
+          finalResponse: {
+            id: 'resp-tool',
+            output: [
+              {
+                arguments: JSON.stringify({ path: 'src/index.ts' }),
+                call_id: 'call-read-file',
+                name: 'read_file',
+                type: 'function_call'
+              }
+            ]
+          }
+        }) as unknown as ModelResponseStream) as StreamModelResponse
+    })
+  );
   const result = await processor.processTurn({
     input: 'Read the index file',
     previousResponseId: null,
@@ -167,26 +173,28 @@ test('SessionProcessor auto-executes read_file tools and returns function_call_o
 test('SessionProcessor pauses for approval-required tools and persists a resumable checkpoint', async () => {
   const session = createSession();
 
-  const processor = new SessionProcessor({
-    streamModelResponse: (() =>
-      createFakeStream({
-        events: [],
-        finalResponse: {
-          id: 'resp-approval',
-          output: [
-            {
-              arguments: JSON.stringify({
-                content: 'export const ok = false;\n',
-                path: 'src/index.ts'
-              }),
-              call_id: 'call-write-file',
-              name: 'write_file',
-              type: 'function_call'
-            }
-          ]
-        }
-      }) as unknown as ReturnType<StreamModelResponseFn>) as StreamModelResponseFn
-  });
+  const processor = new SessionProcessor(
+    buildSessionProcessorDeps({
+      streamModelResponse: (() =>
+        createFakeStream({
+          events: [],
+          finalResponse: {
+            id: 'resp-approval',
+            output: [
+              {
+                arguments: JSON.stringify({
+                  content: 'export const ok = false;\n',
+                  path: 'src/index.ts'
+                }),
+                call_id: 'call-write-file',
+                name: 'write_file',
+                type: 'function_call'
+              }
+            ]
+          }
+        }) as unknown as ModelResponseStream) as StreamModelResponse
+    })
+  );
   const result = await processor.processTurn({
     input: 'Update the file',
     previousResponseId: null,

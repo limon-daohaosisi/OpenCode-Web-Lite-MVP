@@ -1,12 +1,12 @@
+import {
+  RunLoop,
+  type ProcessTurnInput,
+  type ProcessorResult,
+  type SessionProcessor
+} from '@opencode/agent';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ResponseInputItem } from 'openai/resources/responses/responses';
-import { RunLoop } from '../agent/run-loop.js';
-import type {
-  ProcessTurnInput,
-  ProcessorResult,
-  SessionProcessor
-} from '../agent/session-processor.js';
 
 test('RunLoop continues with tool results until the turn completes', async () => {
   const calls: ProcessTurnInput[] = [];

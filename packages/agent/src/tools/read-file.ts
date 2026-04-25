@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import type { ReadFileInput, ToolDefinition } from '@opencode/shared';
 import { z } from 'zod';
 import { resolveWorkspacePath } from './guards.js';
+import type { ToolDefinition } from './types.js';
+
+export type ReadFileToolInput = {
+  path: string;
+};
 
 export const readFileInputSchema = z
   .object({
@@ -25,10 +29,8 @@ export const readFileToolDefinition: ToolDefinition = {
   name: 'read_file'
 };
 
-export type ReadFileToolInput = ReadFileInput;
-
 export async function readFileTool(
-  input: ReadFileInput,
+  input: ReadFileToolInput,
   workspaceRoot: string
 ) {
   const absolutePath = resolveWorkspacePath(workspaceRoot, input.path);

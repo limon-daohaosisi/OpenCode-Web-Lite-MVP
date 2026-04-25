@@ -1,9 +1,14 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ToolDefinition, WriteFileInput } from '@opencode/shared';
 import { z } from 'zod';
 import { createUnifiedDiff } from './diff.js';
 import { resolveWorkspacePath } from './guards.js';
+import type { ToolDefinition } from './types.js';
+
+export type WriteFileToolInput = {
+  content: string;
+  path: string;
+};
 
 export const writeFileInputSchema = z
   .object({
@@ -33,10 +38,8 @@ export const writeFileToolDefinition: ToolDefinition = {
   name: 'write_file'
 };
 
-export type WriteFileToolInput = WriteFileInput;
-
 export async function buildWriteFileApproval(
-  input: WriteFileInput,
+  input: WriteFileToolInput,
   workspaceRoot: string
 ) {
   const absolutePath = resolveWorkspacePath(workspaceRoot, input.path);
@@ -50,7 +53,7 @@ export async function buildWriteFileApproval(
 }
 
 export async function executeWriteFile(
-  input: WriteFileInput,
+  input: WriteFileToolInput,
   workspaceRoot: string
 ) {
   const absolutePath = resolveWorkspacePath(workspaceRoot, input.path);

@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
-import type { RunCommandInput, ToolDefinition } from '@opencode/shared';
 import { z } from 'zod';
 import { assertSafeCommand } from './guards.js';
+import type { ToolDefinition } from './types.js';
 
-export type RunCommandToolInput = RunCommandInput & {
+export type RunCommandToolInput = {
   timeoutMs?: number;
+  command: string;
 };
 
 export const runCommandInputSchema = z

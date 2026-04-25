@@ -3,9 +3,9 @@ import type {
   FunctionTool,
   ResponseInputItem
 } from 'openai/resources/responses/responses';
-import type { ToolDefinition } from '@opencode/shared';
 import { SYSTEM_PROMPT } from './prompt.js';
 import { toolRegistry } from './tools/index.js';
+import type { ToolDefinition } from './tools/types.js';
 
 export type AgentRunInput = {
   input: string | ResponseInputItem[];

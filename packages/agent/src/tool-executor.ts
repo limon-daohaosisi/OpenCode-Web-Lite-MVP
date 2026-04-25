@@ -1,4 +1,3 @@
-import type { ToolName } from '@opencode/shared';
 import {
   buildWriteFileApproval,
   executeWriteFile,
@@ -11,6 +10,7 @@ import {
   type WriteFileToolInput,
   writeFileInputSchema
 } from './tools/index.js';
+import type { ToolName } from './tools/types.js';
 
 type ApprovalResult = {
   kind: 'approval';

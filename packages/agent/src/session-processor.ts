@@ -7,8 +7,7 @@ import type {
   SessionDto,
   SessionEvent,
   SessionStatus,
-  ToolCallDto,
-  ToolName
+  ToolCallDto
 } from '@opencode/shared';
 import type {
   ResponseFunctionToolCall,
@@ -22,6 +21,7 @@ import {
   toolRequiresApproval
 } from './tool-executor.js';
 import type { StreamModelResponse } from './model-client.js';
+import type { ToolName } from './tools/types.js';
 
 type CreateApprovalInput = {
   createdAt: string;

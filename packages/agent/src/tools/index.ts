@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '@opencode/shared';
+import type { ToolDefinition } from './types.js';
 
 export {
   type ReadFileToolInput,
@@ -21,6 +21,7 @@ export {
 } from './write-file.js';
 export { resolveWorkspacePath, assertSafeCommand } from './guards.js';
 export { createUnifiedDiff } from './diff.js';
+export type { ToolDefinition, ToolName } from './types.js';
 import { readFileToolDefinition } from './read-file.js';
 import { runCommandToolDefinition } from './run-command.js';
 import { writeFileToolDefinition } from './write-file.js';

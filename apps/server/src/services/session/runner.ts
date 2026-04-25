@@ -1,4 +1,4 @@
-import { ServiceError } from '../lib/service-error.js';
+import { ServiceError } from '../../lib/service-error.js';
 
 export class SessionRunner {
   private readonly activeRuns = new Set<string>();

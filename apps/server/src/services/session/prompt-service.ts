@@ -3,14 +3,16 @@ import type {
   SubmitSessionMessageResponse,
   ToolCallDto
 } from '@opencode/shared';
+import type { Lifecycle } from '@opencode/agent';
 import { approvalRepository } from '../../repositories/approval-repository.js';
 import { toolCallRepository } from '../../repositories/tool-call-repository.js';
 import { ServiceError } from '../../lib/service-error.js';
-import { lifecycle, type Lifecycle } from '../../agent/lifecycle.js';
-import { sessionRunner, type SessionRunner } from '../../agent/runner.js';
+import { lifecycle } from '../../wiring/agent.js';
 import { messageService } from './message-service.js';
-import { sessionEventService } from './session-event-service.js';
-import { sessionService } from './session-service.js';
+import type { SessionRunner} from './runner.js';
+import { sessionRunner } from './runner.js';
+import { sessionService } from './service.js';
+import { sessionEventService } from './event-service.js';
 
 type SubmitUserMessageInput = {
   content: string;

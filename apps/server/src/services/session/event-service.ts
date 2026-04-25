@@ -3,7 +3,7 @@ import type {
   SessionEvent,
   SessionEventEnvelope
 } from '@opencode/shared';
-import { sessionStreamHub } from '../../internal/realtime/session-stream-hub.js';
+import { sessionStreamHub } from './stream-hub.js';
 import { parseJsonValue } from '../../lib/json.js';
 import { sessionEventRepository } from '../../repositories/session-event-repository.js';
 

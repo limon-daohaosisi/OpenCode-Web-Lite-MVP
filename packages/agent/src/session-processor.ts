@@ -1,24 +1,99 @@
 import { randomUUID } from 'node:crypto';
-import type { MessageDto, SessionCheckpoint, ToolName } from '@opencode/shared';
+import type {
+  ApprovalDto,
+  MessageDto,
+  MessagePart,
+  SessionCheckpoint,
+  SessionDto,
+  SessionEvent,
+  SessionStatus,
+  ToolCallDto,
+  ToolName
+} from '@opencode/shared';
 import type {
   ResponseFunctionToolCall,
   ResponseInputItem,
   ResponseOutputItem
 } from 'openai/resources/responses/responses';
-import { approvalRepository } from '../repositories/approval-repository.js';
-import { toolCallRepository } from '../repositories/tool-call-repository.js';
-import { stringifyJsonValue } from '../lib/json.js';
-import { messageService } from '../services/session/message-service.js';
-import { sessionEventService } from '../services/session/session-event-service.js';
-import { sessionService } from '../services/session/session-service.js';
 import { buildSessionCheckpoint } from './checkpoint.js';
-import { streamModelResponse } from './model-client.js';
-import { prepareToolExecution, toolRequiresApproval } from './tool-executor.js';
+import {
+  executeApprovedTool,
+  prepareToolExecution,
+  toolRequiresApproval
+} from './tool-executor.js';
+import type { StreamModelResponse } from './model-client.js';
 
-type SessionProcessorDeps = {
+type CreateApprovalInput = {
+  createdAt: string;
+  decisionReasonText: null | string;
+  decidedAt: null | string;
+  decidedBy: null | string;
+  decisionScope: 'once' | 'session_rule';
+  id: string;
+  kind: ApprovalDto['kind'];
+  payload: Record<string, unknown>;
+  sessionId: string;
+  status: ApprovalDto['status'];
+  suggestedRuleJson: null | string;
+  taskId: null | string;
+  toolCallId: string;
+};
+
+type CreateMessageInput = {
+  content: MessagePart[];
+  createdAt?: string;
+  id?: string;
+  role: MessageDto['role'];
+  sessionId: string;
+  taskId?: string;
+};
+
+type CreateToolCallInput = {
+  createdAt: string;
+  id: string;
+  input: Record<string, unknown>;
+  messageId: null | string;
+  requiresApproval: boolean;
+  sessionId: string;
+  startedAt?: string;
+  status: ToolCallDto['status'];
+  taskId: null | string;
+  toolName: ToolName;
+  updatedAt: string;
+};
+
+type UpdateSessionRuntimeStateInput = {
+  currentTaskId?: null | string;
+  lastCheckpoint?: null | SessionCheckpoint | string;
+  lastErrorText?: null | string;
+  sessionId: string;
+  status?: SessionStatus;
+};
+
+export type SessionProcessorDeps = {
+  appendSessionEvent(event: SessionEvent): unknown;
+  createApproval(input: CreateApprovalInput): ApprovalDto;
+  createId?: () => string;
+  createMessage(input: CreateMessageInput): MessageDto;
+  createToolCall(input: CreateToolCallInput): ToolCallDto;
+  executeApprovedTool?: typeof executeApprovedTool;
+  now?: () => string;
   prepareToolExecution?: typeof prepareToolExecution;
-  streamModelResponse?: typeof streamModelResponse;
+  streamModelResponse: StreamModelResponse;
   toolRequiresApproval?: typeof toolRequiresApproval;
+  updateMessageContent(id: string, content: MessagePart[]): MessageDto | null;
+  updateSessionRuntimeState(
+    input: UpdateSessionRuntimeStateInput
+  ): SessionDto | null;
+  updateToolCall(input: {
+    completedAt?: null | string;
+    errorText?: null | string;
+    id: string;
+    result?: null | Record<string, unknown>;
+    startedAt?: null | string;
+    status: ToolCallDto['status'];
+    updatedAt: string;
+  }): ToolCallDto | null;
 };
 
 export type ProcessTurnInput = {
@@ -69,20 +144,20 @@ export function buildFunctionCallOutput(
 ): ResponseInputItem {
   return {
     call_id: callId,
-    output: stringifyJsonValue(payload),
+    output: JSON.stringify(payload),
     type: 'function_call_output'
   };
 }
 
 export class SessionProcessor {
-  constructor(private readonly deps: SessionProcessorDeps = {}) {}
+  constructor(private readonly deps: SessionProcessorDeps) {}
 
   async processTurn(input: ProcessTurnInput): Promise<ProcessorResult> {
     const assistantState: AssistantMessageState = {
       message: null,
       text: ''
     };
-    const stream = this.streamModelResponse({
+    const stream = this.deps.streamModelResponse({
       input: input.input,
       previousResponseId: input.previousResponseId
     });
@@ -98,14 +173,14 @@ export class SessionProcessor {
       );
       assistantState.text += event.delta;
       assistantState.message =
-        messageService.updateMessageContent(message.id, [
+        this.deps.updateMessageContent(message.id, [
           {
             text: assistantState.text,
             type: 'text'
           }
         ]) ?? message;
 
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         delta: event.delta,
         messageId: message.id,
         sessionId: input.sessionId,
@@ -117,7 +192,7 @@ export class SessionProcessor {
     const previousResponseId = finalResponse.id;
 
     if (assistantState.message) {
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         messageId: assistantState.message.id,
         sessionId: input.sessionId,
         type: 'message.completed'
@@ -139,7 +214,7 @@ export class SessionProcessor {
         kind: 'executing_task',
         previousResponseId
       });
-      const updatedSession = sessionService.updateSessionRuntimeState({
+      const updatedSession = this.deps.updateSessionRuntimeState({
         lastCheckpoint: checkpoint,
         lastErrorText: null,
         sessionId: input.sessionId,
@@ -147,7 +222,7 @@ export class SessionProcessor {
       });
 
       if (updatedSession) {
-        sessionEventService.append({
+        this.deps.appendSessionEvent({
           sessionId: updatedSession.id,
           type: 'session.updated',
           updatedAt: updatedSession.updatedAt
@@ -189,12 +264,121 @@ export class SessionProcessor {
     };
   }
 
+  async executeApprovedToolCall(input: {
+    callId: string;
+    decision: 'approved' | 'rejected';
+    sessionId: string;
+    toolCall: ToolCallDto;
+    workspaceRoot: string;
+  }): Promise<ResponseInputItem> {
+    const toolName = input.toolCall.toolName as ToolName;
+    const now = this.now();
+
+    if (input.decision === 'rejected') {
+      const payload = {
+        error: 'Approval rejected by user',
+        ok: false,
+        rejected: true
+      };
+
+      await this.createToolResultMessage({
+        payload,
+        sessionId: input.sessionId,
+        toolName
+      });
+
+      this.deps.appendSessionEvent({
+        error: 'Approval rejected by user',
+        sessionId: input.sessionId,
+        toolCallId: input.toolCall.id,
+        type: 'tool.failed'
+      });
+
+      return buildFunctionCallOutput(input.callId, payload);
+    }
+
+    this.deps.updateToolCall({
+      id: input.toolCall.id,
+      startedAt: now,
+      status: 'running',
+      updatedAt: now
+    });
+
+    this.deps.appendSessionEvent({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCall.id,
+      type: 'tool.running'
+    });
+
+    try {
+      const result = await this.executeApprovedTool(
+        toolName as Extract<ToolName, 'run_command' | 'write_file'>,
+        input.toolCall.input,
+        input.workspaceRoot
+      );
+      const completedAt = this.now();
+      const completedToolCall = this.deps.updateToolCall({
+        completedAt,
+        id: input.toolCall.id,
+        result,
+        startedAt: now,
+        status: 'completed',
+        updatedAt: completedAt
+      });
+
+      await this.createToolResultMessage({
+        payload: result,
+        sessionId: input.sessionId,
+        toolName
+      });
+
+      if (completedToolCall) {
+        this.deps.appendSessionEvent({
+          sessionId: input.sessionId,
+          toolCall: completedToolCall,
+          type: 'tool.completed'
+        });
+      }
+
+      return buildFunctionCallOutput(input.callId, result);
+    } catch (error) {
+      const errorMessage = formatError(error);
+      const payload = { error: errorMessage, ok: false };
+      const completedAt = this.now();
+
+      this.deps.updateToolCall({
+        completedAt,
+        errorText: errorMessage,
+        id: input.toolCall.id,
+        result: payload,
+        startedAt: now,
+        status: 'failed',
+        updatedAt: completedAt
+      });
+
+      await this.createToolResultMessage({
+        payload,
+        sessionId: input.sessionId,
+        toolName
+      });
+
+      this.deps.appendSessionEvent({
+        error: errorMessage,
+        sessionId: input.sessionId,
+        toolCallId: input.toolCall.id,
+        type: 'tool.failed'
+      });
+
+      return buildFunctionCallOutput(input.callId, payload);
+    }
+  }
+
   private async createToolResultMessage(input: {
     payload: Record<string, unknown>;
     sessionId: string;
     toolName: ToolName;
   }) {
-    const message = messageService.createMessage({
+    const message = this.deps.createMessage({
       content: [
         {
           content: input.payload,
@@ -206,7 +390,7 @@ export class SessionProcessor {
       sessionId: input.sessionId
     });
 
-    sessionEventService.append({
+    this.deps.appendSessionEvent({
       message,
       sessionId: input.sessionId,
       type: 'message.created'
@@ -223,14 +407,14 @@ export class SessionProcessor {
       return state.message;
     }
 
-    const message = messageService.createMessage({
+    const message = this.deps.createMessage({
       content: [],
       role: 'assistant',
       sessionId
     });
 
     state.message = message;
-    sessionEventService.append({
+    this.deps.appendSessionEvent({
       message,
       sessionId,
       type: 'message.created'
@@ -245,7 +429,7 @@ export class SessionProcessor {
     sessionId: string;
     workspaceRoot: string;
   }): Promise<ExecuteFunctionCallResult> {
-    const now = new Date().toISOString();
+    const now = this.now();
     const rawInput = this.parseFunctionArguments(input.functionCall);
     const toolName = input.functionCall.name as ToolName;
 
@@ -254,9 +438,9 @@ export class SessionProcessor {
     }
 
     if (this.toolRequiresApproval(toolName)) {
-      const toolCall = toolCallRepository.create({
+      const toolCall = this.deps.createToolCall({
         createdAt: now,
-        id: randomUUID(),
+        id: this.createId(),
         input: rawInput,
         messageId: input.assistantMessageId ?? null,
         requiresApproval: true,
@@ -278,13 +462,13 @@ export class SessionProcessor {
         );
       }
 
-      const approval = approvalRepository.create({
+      const approval = this.deps.createApproval({
         createdAt: now,
         decisionReasonText: null,
         decidedAt: null,
         decidedBy: null,
         decisionScope: 'once',
-        id: randomUUID(),
+        id: this.createId(),
         kind: toolName,
         payload: approvalPayload.payload,
         sessionId: input.sessionId,
@@ -294,13 +478,13 @@ export class SessionProcessor {
         toolCallId: toolCall.id
       });
 
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         approval,
         sessionId: input.sessionId,
         toolCall,
         type: 'tool.pending'
       });
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         approval,
         sessionId: input.sessionId,
         type: 'approval.created'
@@ -313,20 +497,20 @@ export class SessionProcessor {
         previousResponseId: input.previousResponseId,
         toolCallId: toolCall.id
       });
-      const updatedSession = sessionService.updateSessionRuntimeState({
+      const updatedSession = this.deps.updateSessionRuntimeState({
         lastCheckpoint: checkpoint,
         sessionId: input.sessionId,
         status: 'waiting_approval'
       });
 
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         checkpoint,
         sessionId: input.sessionId,
         type: 'session.resumable'
       });
 
       if (updatedSession) {
-        sessionEventService.append({
+        this.deps.appendSessionEvent({
           sessionId: updatedSession.id,
           type: 'session.updated',
           updatedAt: updatedSession.updatedAt
@@ -339,9 +523,9 @@ export class SessionProcessor {
       };
     }
 
-    const runningToolCall = toolCallRepository.create({
+    const runningToolCall = this.deps.createToolCall({
       createdAt: now,
-      id: randomUUID(),
+      id: this.createId(),
       input: rawInput,
       messageId: input.assistantMessageId ?? null,
       requiresApproval: false,
@@ -353,7 +537,7 @@ export class SessionProcessor {
       updatedAt: now
     });
 
-    sessionEventService.append({
+    this.deps.appendSessionEvent({
       sessionId: input.sessionId,
       toolCallId: runningToolCall.id,
       type: 'tool.running'
@@ -370,8 +554,8 @@ export class SessionProcessor {
         throw new Error('Expected auto-executed tool result.');
       }
 
-      const completedAt = new Date().toISOString();
-      const completedToolCall = toolCallRepository.update({
+      const completedAt = this.now();
+      const completedToolCall = this.deps.updateToolCall({
         completedAt,
         id: runningToolCall.id,
         result: prepared.output,
@@ -390,7 +574,7 @@ export class SessionProcessor {
         toolName
       });
 
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         sessionId: input.sessionId,
         toolCall: completedToolCall,
         type: 'tool.completed'
@@ -409,8 +593,8 @@ export class SessionProcessor {
         error: errorMessage,
         ok: false
       };
-      const completedAt = new Date().toISOString();
-      const failedToolCall = toolCallRepository.update({
+      const completedAt = this.now();
+      const failedToolCall = this.deps.updateToolCall({
         completedAt,
         errorText: errorMessage,
         id: runningToolCall.id,
@@ -426,7 +610,7 @@ export class SessionProcessor {
         toolName
       });
 
-      sessionEventService.append({
+      this.deps.appendSessionEvent({
         error: errorMessage,
         sessionId: input.sessionId,
         toolCallId: failedToolCall?.id ?? runningToolCall.id,
@@ -438,6 +622,26 @@ export class SessionProcessor {
         output: buildFunctionCallOutput(input.functionCall.call_id, payload)
       };
     }
+  }
+
+  private createId() {
+    return this.deps.createId?.() ?? randomUUID();
+  }
+
+  private executeApprovedTool(
+    toolName: Extract<ToolName, 'run_command' | 'write_file'>,
+    rawInput: Record<string, unknown>,
+    workspaceRoot: string
+  ) {
+    return (this.deps.executeApprovedTool ?? executeApprovedTool)(
+      toolName,
+      rawInput,
+      workspaceRoot
+    );
+  }
+
+  private now() {
+    return this.deps.now?.() ?? new Date().toISOString();
   }
 
   private parseFunctionArguments(functionCall: ResponseFunctionToolCall) {
@@ -462,15 +666,7 @@ export class SessionProcessor {
     );
   }
 
-  private streamModelResponse(
-    input: Parameters<typeof streamModelResponse>[0]
-  ) {
-    return (this.deps.streamModelResponse ?? streamModelResponse)(input);
-  }
-
   private toolRequiresApproval(toolName: ToolName) {
     return (this.deps.toolRequiresApproval ?? toolRequiresApproval)(toolName);
   }
 }
-
-export const sessionProcessor = new SessionProcessor();

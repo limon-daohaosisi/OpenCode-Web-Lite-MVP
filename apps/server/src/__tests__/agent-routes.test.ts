@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
-import { AgentLoop } from '../agent/loop.js';
+import { sessionPromptService } from '../services/session/prompt-service.js';
 import { dbTestContext, resetTestDatabase } from './db-test-context.js';
 import { parseJson } from './server-test-helpers.js';
 
@@ -23,10 +23,10 @@ afterEach(() => {
   resetTestDatabase();
 });
 
-test('POST /api/sessions/:sessionId/messages delegates to AgentLoop and returns 202', async () => {
-  const submitUserMessage = mock.method(
-    AgentLoop.prototype,
-    'submitUserMessage',
+test('POST /api/sessions/:sessionId/messages delegates to SessionPromptService and returns 202', async () => {
+  const prompt = mock.method(
+    sessionPromptService,
+    'prompt',
     async (input: { content: string; sessionId: string }) => {
       assert.deepEqual(input, {
         content: 'Explain the current server structure',
@@ -58,7 +58,7 @@ test('POST /api/sessions/:sessionId/messages delegates to AgentLoop and returns 
   });
 
   assert.equal(response.status, 202);
-  assert.equal(submitUserMessage.mock.calls.length, 1);
+  assert.equal(prompt.mock.calls.length, 1);
 
   const payload = await parseJson<{
     accepted: boolean;
@@ -71,10 +71,10 @@ test('POST /api/sessions/:sessionId/messages delegates to AgentLoop and returns 
 });
 
 test('agent routes map ServiceError instances to HTTP errors', async () => {
-  mock.method(AgentLoop.prototype, 'submitUserMessage', async () => {
+  mock.method(sessionPromptService, 'prompt', async () => {
     throw new ServiceError('Session already has an active run.', 409);
   });
-  mock.method(AgentLoop.prototype, 'resolveApproval', async () => {
+  mock.method(sessionPromptService, 'resolveApproval', async () => {
     throw new ServiceError('Approval not found: missing-approval', 404);
   });
 
@@ -107,11 +107,11 @@ test('agent routes map ServiceError instances to HTTP errors', async () => {
   );
 });
 
-test('approval routes delegate approve and reject decisions to AgentLoop', async () => {
+test('approval routes delegate approve and reject decisions to SessionPromptService', async () => {
   const decisions: Array<{ approvalId: string; decision: string }> = [];
 
   mock.method(
-    AgentLoop.prototype,
+    sessionPromptService,
     'resolveApproval',
     async (input: {
       approvalId: string;

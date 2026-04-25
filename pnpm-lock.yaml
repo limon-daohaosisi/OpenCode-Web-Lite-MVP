@@ -35,9 +35,9 @@ importers:
       '@hono/zod-validator':
         specifier: ^0.7.6
         version: 0.7.6(hono@4.12.9)(zod@4.3.6)
-      '@opencode/agent-core':
+      '@opencode/agent':
         specifier: workspace:*
-        version: link:../../packages/agent-core
+        version: link:../../packages/agent
       '@opencode/orm':
         specifier: workspace:*
         version: link:../../packages/orm
@@ -119,12 +119,24 @@ importers:
         specifier: ^6.2.2
         version: 6.4.1(@types/node@22.19.15)(jiti@1.21.7)(tsx@4.21.0)
 
-  packages/agent-core:
+  packages/agent:
     dependencies:
+      '@opencode/orm':
+        specifier: workspace:*
+        version: link:../orm
       '@opencode/shared':
         specifier: workspace:*
         version: link:../shared
+      openai:
+        specifier: ^6.34.0
+        version: 6.34.0(zod@4.3.6)
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
     devDependencies:
+      '@types/node':
+        specifier: ^22.13.10
+        version: 22.19.15
       typescript:
         specifier: ^5.8.2
         version: 5.9.3

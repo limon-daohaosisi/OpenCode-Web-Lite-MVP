@@ -1,31 +1,16 @@
-import type { RunCommandInput, ToolInputMap, ToolName } from '@opencode/shared';
-import { z } from 'zod';
-import { readFileTool } from '../tools/read-file.js';
-import { runCommandTool } from '../tools/run-command.js';
+import type { ToolName } from '@opencode/shared';
 import {
   buildWriteFileApproval,
-  executeWriteFile
-} from '../tools/write-file.js';
-
-const readFileInputSchema = z
-  .object({
-    path: z.string().trim().min(1)
-  })
-  .strict();
-
-const writeFileInputSchema = z
-  .object({
-    content: z.string(),
-    path: z.string().trim().min(1)
-  })
-  .strict();
-
-const runCommandInputSchema = z
-  .object({
-    command: z.string().trim().min(1),
-    timeoutMs: z.number().int().positive().optional()
-  })
-  .strict();
+  executeWriteFile,
+  type ReadFileToolInput,
+  readFileInputSchema,
+  readFileTool,
+  runCommandInputSchema,
+  runCommandTool,
+  type RunCommandToolInput,
+  type WriteFileToolInput,
+  writeFileInputSchema
+} from './tools/index.js';
 
 type ApprovalResult = {
   kind: 'approval';
@@ -38,10 +23,16 @@ type AutoExecutionResult = {
 };
 
 type ParsedToolInput =
-  | { input: ToolInputMap['read_file']; toolName: 'read_file' }
-  | { input: ToolInputMap['write_file']; toolName: 'write_file' }
   | {
-      input: RunCommandInput & { timeoutMs?: number };
+      input: ReadFileToolInput;
+      toolName: 'read_file';
+    }
+  | {
+      input: WriteFileToolInput;
+      toolName: 'write_file';
+    }
+  | {
+      input: RunCommandToolInput;
       toolName: 'run_command';
     };
 

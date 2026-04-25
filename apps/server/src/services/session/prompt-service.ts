@@ -9,7 +9,7 @@ import { toolCallRepository } from '../../repositories/tool-call-repository.js';
 import { ServiceError } from '../../lib/service-error.js';
 import { lifecycle } from '../../wiring/agent.js';
 import { messageService } from './message-service.js';
-import type { SessionRunner} from './runner.js';
+import type { SessionRunner } from './runner.js';
 import { sessionRunner } from './runner.js';
 import { sessionService } from './service.js';
 import { sessionEventService } from './event-service.js';

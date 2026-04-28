@@ -5,11 +5,11 @@ import {
   tasks,
   sessions,
   artifacts,
-  messageParts,
-  messages,
   plans,
   sessionEvents,
-  workspaces
+  workspaces,
+  messages,
+  messageParts
 } from './schema.js';
 
 export const approvalsRelations = relations(approvals, ({ one }) => ({
@@ -30,13 +30,13 @@ export const approvalsRelations = relations(approvals, ({ one }) => ({
 export const toolCallsRelations = relations(toolCalls, ({ one, many }) => ({
   approvals: many(approvals),
   artifacts: many(artifacts),
-  message: one(messages, {
-    fields: [toolCalls.messageId],
-    references: [messages.id]
-  }),
   messagePart: one(messageParts, {
     fields: [toolCalls.messagePartId],
     references: [messageParts.id]
+  }),
+  message: one(messages, {
+    fields: [toolCalls.messageId],
+    references: [messages.id]
   }),
   task: one(tasks, {
     fields: [toolCalls.taskId],
@@ -51,8 +51,6 @@ export const toolCallsRelations = relations(toolCalls, ({ one, many }) => ({
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   approvals: many(approvals),
   artifacts: many(artifacts),
-  messages: many(messages),
-  messageParts: many(messageParts),
   sessionEvents: many(sessionEvents),
   task: one(tasks, {
     fields: [tasks.parentTaskId],
@@ -70,28 +68,13 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     fields: [tasks.sessionId],
     references: [sessions.id]
   }),
+  messages: many(messages),
   toolCalls: many(toolCalls)
 }));
-
-export const messagePartsRelations = relations(
-  messageParts,
-  ({ one, many }) => ({
-    message: one(messages, {
-      fields: [messageParts.messageId],
-      references: [messages.id]
-    }),
-    session: one(sessions, {
-      fields: [messageParts.sessionId],
-      references: [sessions.id]
-    }),
-    toolCalls: many(toolCalls)
-  })
-);
 
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   approvals: many(approvals),
   artifacts: many(artifacts),
-  messages: many(messages),
   plans: many(plans),
   sessionEvents: many(sessionEvents),
   workspace: one(workspaces, {
@@ -99,7 +82,9 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
     references: [workspaces.id]
   }),
   tasks: many(tasks),
-  toolCalls: many(toolCalls)
+  messages: many(messages),
+  toolCalls: many(toolCalls),
+  messageParts: many(messageParts)
 }));
 
 export const artifactsRelations = relations(artifacts, ({ one }) => ({
@@ -115,19 +100,6 @@ export const artifactsRelations = relations(artifacts, ({ one }) => ({
     fields: [artifacts.sessionId],
     references: [sessions.id]
   })
-}));
-
-export const messagesRelations = relations(messages, ({ one, many }) => ({
-  parts: many(messageParts),
-  task: one(tasks, {
-    fields: [messages.taskId],
-    references: [tasks.id]
-  }),
-  session: one(sessions, {
-    fields: [messages.sessionId],
-    references: [sessions.id]
-  }),
-  toolCalls: many(toolCalls)
 }));
 
 export const plansRelations = relations(plans, ({ one, many }) => ({
@@ -152,3 +124,31 @@ export const sessionEventsRelations = relations(sessionEvents, ({ one }) => ({
 export const workspacesRelations = relations(workspaces, ({ many }) => ({
   sessions: many(sessions)
 }));
+
+export const messagesRelations = relations(messages, ({ one, many }) => ({
+  task: one(tasks, {
+    fields: [messages.taskId],
+    references: [tasks.id]
+  }),
+  session: one(sessions, {
+    fields: [messages.sessionId],
+    references: [sessions.id]
+  }),
+  toolCalls: many(toolCalls),
+  messageParts: many(messageParts)
+}));
+
+export const messagePartsRelations = relations(
+  messageParts,
+  ({ one, many }) => ({
+    toolCalls: many(toolCalls),
+    message: one(messages, {
+      fields: [messageParts.messageId],
+      references: [messages.id]
+    }),
+    session: one(sessions, {
+      fields: [messageParts.sessionId],
+      references: [sessions.id]
+    })
+  })
+);

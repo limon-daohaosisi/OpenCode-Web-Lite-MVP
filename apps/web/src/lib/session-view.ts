@@ -54,7 +54,27 @@ function getMessageBodyText(message: MessageDto) {
         return JSON.stringify(part.files, null, 2);
       }
 
-      return JSON.stringify(part.content, null, 2);
+      if (part.type === 'tool') {
+        if (part.state.status === 'completed') {
+          return part.state.outputText;
+        }
+
+        if (part.state.status === 'error') {
+          return part.state.errorText;
+        }
+
+        return JSON.stringify(part.state.input, null, 2);
+      }
+
+      if (part.type === 'file') {
+        return part.url;
+      }
+
+      if (part.type === 'compaction') {
+        return part.reason;
+      }
+
+      return '';
     })
     .join('\n')
     .trim();
@@ -138,21 +158,11 @@ export function buildTimelineItemsFromEvents(events: SessionEventEnvelope[]) {
           createTimelineEntry({
             description: getMessageBodyText(message) || '无消息内容',
             id: message.id,
-            label:
-              message.role === 'user'
-                ? 'User'
-                : message.role === 'tool'
-                  ? 'Tool'
-                  : 'Message',
-            status: message.role === 'tool' ? 'success' : 'info',
+            label: message.role === 'user' ? 'User' : 'Message',
+            status: 'info',
             sortKey: `${envelope.createdAt}:${String(envelope.sequenceNo).padStart(8, '0')}`,
             time,
-            title:
-              message.role === 'user'
-                ? '用户消息'
-                : message.role === 'tool'
-                  ? '工具结果'
-                  : '消息创建',
+            title: message.role === 'user' ? '用户消息' : '消息创建',
             type: 'message'
           })
         );
@@ -309,13 +319,8 @@ export function buildTimelineItemsFromMessages(messages: MessageDto[]) {
             ? 'Assistant'
             : message.role === 'user'
               ? 'User'
-              : message.role === 'tool'
-                ? 'Tool'
-                : 'Message',
-        status:
-          message.role === 'assistant' || message.role === 'tool'
-            ? 'success'
-            : 'info',
+              : 'Message',
+        status: message.role === 'assistant' ? 'success' : 'info',
         sortKey: `${message.createdAt}:${String(index).padStart(8, '0')}`,
         time: formatTimestamp(message.createdAt),
         title:
@@ -323,9 +328,7 @@ export function buildTimelineItemsFromMessages(messages: MessageDto[]) {
             ? 'Assistant 响应完成'
             : message.role === 'user'
               ? '用户消息'
-              : message.role === 'tool'
-                ? '工具结果'
-                : '消息创建',
+              : '消息创建',
         type: 'message'
       })
     )

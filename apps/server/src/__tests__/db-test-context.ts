@@ -10,6 +10,7 @@ const [
   { ServiceError },
   { buildSessionCheckpoint },
   { messageService },
+  { partService },
   { sessionEventService },
   { sessionService },
   { workspaceService }
@@ -19,6 +20,7 @@ const [
   import('../lib/service-error.js'),
   import('@opencode/agent'),
   import('../services/session/message-service.js'),
+  import('../services/session/part-service.js'),
   import('../services/session/event-service.js'),
   import('../services/session/service.js'),
   import('../services/workspace/service.js')
@@ -48,6 +50,7 @@ export const dbTestContext = {
   environment,
   ServiceError,
   messageService,
+  partService,
   sessionEventService,
   sessionService,
   sqlite,

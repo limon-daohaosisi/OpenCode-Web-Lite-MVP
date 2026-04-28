@@ -4,14 +4,14 @@ import { assertSafeCommand } from './guards.js';
 import type { ToolDefinition } from './types.js';
 
 export type RunCommandToolInput = {
-  timeoutMs?: number;
   command: string;
+  timeoutMs: number | null;
 };
 
 export const runCommandInputSchema = z
   .object({
     command: z.string().trim().min(1),
-    timeoutMs: z.number().int().positive().optional()
+    timeoutMs: z.number().int().positive().nullable()
   })
   .strict();
 
@@ -27,12 +27,11 @@ export const runCommandToolDefinition: ToolDefinition = {
       },
       timeoutMs: {
         description:
-          'Optional timeout in milliseconds before the command is terminated.',
-        minimum: 1,
-        type: 'integer'
+          'Timeout in milliseconds before the command is terminated. Use null for the default timeout.',
+        type: ['integer', 'null']
       }
     },
-    required: ['command'],
+    required: ['command', 'timeoutMs'],
     type: 'object'
   },
   name: 'run_command'
@@ -75,6 +74,11 @@ export async function runCommandTool(
 
     child.on('exit', (exitCode) => {
       clearTimeout(timer);
+      if (exitCode && exitCode !== 0) {
+        reject(new Error(`Command exited with code ${exitCode}: ${stderr}`));
+        return;
+      }
+
       resolve({ exitCode, stderr, stdout });
     });
 

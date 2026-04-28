@@ -1,54 +1,171 @@
-import type { ResponseInputItem } from 'openai/resources/responses/responses';
+import type { SessionDto, SessionEvent, SessionStatus } from '@opencode/shared';
 import {
-  type ProcessTurnInput,
-  type ProcessorResult,
-  type SessionProcessor
-} from './session-processor.js';
+  toAiSdkTurnRequest,
+  type ModelFactory
+} from './context/ai-sdk-request-adapter.js';
+import type { AiSdkTurnRequest } from './context/schema.js';
+import { ContextBuilder } from './context/builder.js';
+import type { ContextBuilderDeps } from './context/builder.js';
+import { ContextSizeGuard } from './context/size-guard.js';
+import { resolveTools } from './context/tool-registry.js';
+import type { ProcessorResult, SessionProcessor } from './session-processor.js';
+import type { ToolExecutor } from './tool-executor.js';
 
-export type RunLoopInput = ProcessTurnInput;
+export type RunLoopInput = {
+  sessionId: string;
+  workspaceRoot: string;
+};
 
 export type RunLoopResult =
-  | {
-      kind: 'completed';
-      previousResponseId: string;
-    }
-  | {
-      checkpoint: ProcessorResult extends infer T
-        ? T extends { checkpoint: infer Checkpoint }
-          ? Checkpoint
-          : never
-        : never;
-      kind: 'paused_for_approval';
-      previousResponseId: string;
-    };
+  | { finishReason: string; kind: 'completed' }
+  | { checkpoint?: unknown; kind: 'paused_for_approval' }
+  | { error: string; kind: 'failed' }
+  | { error: string; kind: 'context_too_large' }
+  | { kind: 'max_steps_exceeded' };
+
+const contextTooLargeError = 'context_too_large_compact_not_implemented';
+
+export type RunLoopDeps = ContextBuilderDeps & {
+  appendSessionEvent(event: SessionEvent): unknown;
+  getSession(sessionId: string): SessionDto | null;
+  modelFactory: ModelFactory;
+  updateSessionRuntimeState(input: {
+    currentTaskId?: null | string;
+    lastCheckpoint?: null | string;
+    lastErrorText?: null | string;
+    sessionId: string;
+    status?: SessionStatus;
+  }): SessionDto | null;
+};
 
 export class RunLoop {
+  private readonly contextBuilder: ContextBuilder;
+  private readonly sizeGuard = new ContextSizeGuard();
+
   constructor(
-    private readonly processor: Pick<SessionProcessor, 'processTurn'>
-  ) {}
+    private readonly processor: Pick<SessionProcessor, 'processTurn'>,
+    private readonly toolExecutor: Pick<
+      ToolExecutor,
+      'executePendingToolParts'
+    >,
+    private readonly deps: RunLoopDeps,
+    private readonly maxSteps = 10
+  ) {
+    this.contextBuilder = new ContextBuilder(deps);
+  }
 
   async run(input: RunLoopInput): Promise<RunLoopResult> {
-    let currentInput: string | ResponseInputItem[] = input.input;
-    let previousResponseId = input.previousResponseId ?? null;
+    for (let step = 0; step < this.maxSteps; step++) {
+      const session = this.deps.getSession(input.sessionId);
 
-    while (true) {
+      if (!session) {
+        return {
+          error: `Session not found: ${input.sessionId}`,
+          kind: 'failed'
+        };
+      }
+
+      if (session.status === 'waiting_approval') {
+        return { kind: 'paused_for_approval' };
+      }
+
+      let request: AiSdkTurnRequest | null = null;
+
+      try {
+        const context = this.contextBuilder.build(input);
+        const resolvedTools = resolveTools({
+          agentName: context.lastUser.agentName,
+          context,
+          lastUser: context.lastUser,
+          model: context.lastUser.model,
+          sessionId: input.sessionId
+        });
+
+        request = toAiSdkTurnRequest({
+          context,
+          modelFactory: this.deps.modelFactory,
+          tools: resolvedTools
+        });
+
+        this.sizeGuard.assertFits({ context, request, resolvedTools });
+      } catch (error) {
+        if (error instanceof Error && error.message === contextTooLargeError) {
+          const updatedSession = this.deps.updateSessionRuntimeState({
+            lastErrorText: contextTooLargeError,
+            sessionId: input.sessionId,
+            status: 'blocked'
+          });
+
+          this.deps.appendSessionEvent({
+            error: contextTooLargeError,
+            sessionId: input.sessionId,
+            type: 'session.failed'
+          });
+
+          if (updatedSession) {
+            this.deps.appendSessionEvent({
+              sessionId: updatedSession.id,
+              type: 'session.updated',
+              updatedAt: updatedSession.updatedAt
+            });
+          }
+
+          return { error: contextTooLargeError, kind: 'context_too_large' };
+        }
+
+        throw error;
+      }
+
+      if (!request) {
+        return { error: 'Failed to build model request.', kind: 'failed' };
+      }
+
       const result = await this.processor.processTurn({
-        input: currentInput,
-        previousResponseId,
+        request,
         sessionId: input.sessionId,
         workspaceRoot: input.workspaceRoot
       });
+      const terminal = await this.handleProcessorResult(input, result);
 
-      if (result.kind === 'completed') {
-        return result;
+      if (terminal) {
+        return terminal;
       }
+    }
 
-      if (result.kind === 'paused_for_approval') {
-        return result;
+    return { kind: 'max_steps_exceeded' };
+  }
+
+  private async handleProcessorResult(
+    input: RunLoopInput,
+    result: ProcessorResult
+  ): Promise<RunLoopResult | null> {
+    switch (result.kind) {
+      case 'completed':
+        return { finishReason: result.finishReason, kind: 'completed' };
+      case 'paused_for_approval':
+        return { checkpoint: result.checkpoint, kind: 'paused_for_approval' };
+      case 'failed':
+        return { error: result.error, kind: 'failed' };
+      case 'tool_calls': {
+        const toolResult = await this.toolExecutor.executePendingToolParts({
+          parts: result.toolParts,
+          sessionId: input.sessionId,
+          workspaceRoot: input.workspaceRoot
+        });
+
+        if (toolResult.kind === 'completed') {
+          return null;
+        }
+
+        if (toolResult.kind === 'paused_for_approval') {
+          return {
+            checkpoint: toolResult.checkpoint,
+            kind: 'paused_for_approval'
+          };
+        }
+
+        return { error: toolResult.error, kind: 'failed' };
       }
-
-      currentInput = result.nextInput;
-      previousResponseId = result.previousResponseId;
     }
   }
 }

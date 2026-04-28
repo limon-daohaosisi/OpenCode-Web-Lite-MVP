@@ -7,9 +7,10 @@ import { parseJsonValue, stringifyJsonValue } from '../lib/json.js';
 
 type CreateToolCallInput = Omit<
   NewToolCall,
-  'inputJson' | 'requiresApproval'
+  'inputJson' | 'providerMetadataJson' | 'requiresApproval'
 > & {
   input: Record<string, unknown>;
+  providerMetadata?: Record<string, unknown>;
   requiresApproval: boolean;
 };
 
@@ -38,6 +39,10 @@ function mapToolCallRow(row: ToolCallRow): ToolCallDto {
     id: row.id,
     input: parseJsonValue<Record<string, unknown>>(row.inputJson, {}),
     messageId: mapNullableString(row.messageId),
+    messagePartId: mapNullableString(row.messagePartId),
+    modelToolCallId: mapNullableString(row.modelToolCallId),
+    providerMetadata: mapNullableRecord(row.providerMetadataJson),
+    requiresApproval: row.requiresApproval === 1,
     result: mapNullableRecord(row.resultJson),
     sessionId: row.sessionId,
     status: row.status as ToolCallStatus,
@@ -53,6 +58,9 @@ export const toolCallRepository = {
       .values({
         ...input,
         inputJson: stringifyJsonValue(input.input),
+        providerMetadataJson: input.providerMetadata
+          ? stringifyJsonValue(input.providerMetadata)
+          : null,
         requiresApproval: input.requiresApproval ? 1 : 0
       })
       .returning()

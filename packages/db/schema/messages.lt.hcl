@@ -27,12 +27,84 @@ table "messages" {
     default = sql("'message'")
   }
 
+  column "parent_message_id" {
+    type = text
+    null = true
+  }
+
+  column "agent_name" {
+    type = text
+    null = true
+  }
+
+  column "model_provider_id" {
+    type = text
+    null = true
+  }
+
+  column "model_id" {
+    type = text
+    null = true
+  }
+
+  column "status" {
+    type    = text
+    null    = false
+    default = sql("'completed'")
+  }
+
+  column "finish_reason" {
+    type = text
+    null = true
+  }
+
+  column "error_text" {
+    type = text
+    null = true
+  }
+
+  column "summary" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+
+  column "compacted_by_message_id" {
+    type = text
+    null = true
+  }
+
+  column "model_response_id" {
+    type = text
+    null = true
+  }
+
+  column "provider_metadata_json" {
+    type = text
+    null = true
+  }
+
+  column "token_usage_json" {
+    type = text
+    null = true
+  }
+
+  column "runtime_json" {
+    type = text
+    null = true
+  }
+
   column "content_json" {
     type = text
     null = false
   }
 
   column "created_at" {
+    type = text
+    null = false
+  }
+
+  column "updated_at" {
     type = text
     null = false
   }
@@ -54,7 +126,11 @@ table "messages" {
   }
 
   check "messages_valid_role" {
-    expr = "role IN ('system', 'user', 'assistant', 'tool')"
+    expr = "role IN ('user', 'assistant')"
+  }
+
+  check "messages_valid_status" {
+    expr = "status IN ('running', 'completed', 'failed', 'cancelled')"
   }
 
   index "idx_messages_session_created_at" {

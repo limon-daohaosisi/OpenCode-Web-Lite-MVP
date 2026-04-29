@@ -10,6 +10,8 @@ const [
   { ServiceError },
   { buildSessionCheckpoint },
   { messageService },
+  { messagePartService },
+  { toolStateService },
   { sessionEventService },
   { sessionService },
   { workspaceService }
@@ -18,11 +20,18 @@ const [
   import('../db/client.js'),
   import('../lib/service-error.js'),
   import('@opencode/agent'),
-  import('../services/session/message-service.js'),
-  import('../services/session/event-service.js'),
+  import('../services/session/message/service.js'),
+  import('../services/session/message/part-service.js'),
+  import('../services/agent/tool-state-service.js'),
+  import('../services/session-events/event-service.js'),
   import('../services/session/service.js'),
   import('../services/workspace/service.js')
 ]);
+
+const partService = {
+  ...messagePartService,
+  ...toolStateService
+};
 
 try {
   sqlite.exec(environment.migrationSql);
@@ -48,9 +57,12 @@ export const dbTestContext = {
   environment,
   ServiceError,
   messageService,
+  messagePartService,
+  partService,
   sessionEventService,
   sessionService,
   sqlite,
+  toolStateService,
   workspaceService
 };
 

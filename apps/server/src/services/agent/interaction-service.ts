@@ -3,23 +3,24 @@ import type {
   SubmitSessionMessageResponse,
   ToolCallDto
 } from '@opencode/shared';
-import type { Lifecycle } from '@opencode/agent';
+import { normalizePrompt, type Lifecycle } from '@opencode/agent';
 import { approvalRepository } from '../../repositories/approval-repository.js';
 import { toolCallRepository } from '../../repositories/tool-call-repository.js';
 import { ServiceError } from '../../lib/service-error.js';
 import { lifecycle } from '../../wiring/agent.js';
-import { messageService } from './message-service.js';
+import { messageService } from '../session/message/service.js';
 import type { SessionRunner } from './runner.js';
 import { sessionRunner } from './runner.js';
-import { sessionService } from './service.js';
-import { sessionEventService } from './event-service.js';
+import { sessionService } from '../session/service.js';
+import { sessionResumeService } from '../session/resume-service.js';
+import { sessionEventService } from '../session-events/event-service.js';
 
 type SubmitUserMessageInput = {
   content: string;
   sessionId: string;
 };
 
-export class SessionPromptService {
+export class SessionInteractionService {
   constructor(
     private readonly runner: SessionRunner = sessionRunner,
     private readonly runtimeLifecycle: Lifecycle = lifecycle
@@ -44,10 +45,13 @@ export class SessionPromptService {
     const response = await this.runner.ensureRunning(
       input.sessionId,
       async () => {
-        const message = messageService.createMessage({
-          content: [{ text: input.content, type: 'text' }],
-          role: 'user',
+        const normalized = normalizePrompt({
+          content: input.content,
           sessionId: input.sessionId
+        });
+        const message = messageService.createMessage({
+          ...normalized.message,
+          content: normalized.parts
         });
 
         sessionEventService.append({
@@ -77,7 +81,6 @@ export class SessionPromptService {
       },
       async () => {
         await this.runtimeLifecycle.startPromptRun({
-          input: input.content,
           sessionId: input.sessionId
         });
       }
@@ -109,6 +112,8 @@ export class SessionPromptService {
       );
     }
 
+    sessionResumeService.assertApprovalResumeReady({ approval, toolCall });
+
     const response = await this.runner.ensureRunning(
       approval.sessionId,
       async () => {
@@ -118,13 +123,9 @@ export class SessionPromptService {
           id: approval.id,
           status: input.decision
         });
-        const updatedToolCall = toolCallRepository.update({
-          id: toolCall.id,
-          status: input.decision === 'approved' ? 'approved' : 'rejected',
-          updatedAt: now
-        });
+        const updatedToolCall = toolCall;
 
-        if (!updatedApproval || !updatedToolCall) {
+        if (!updatedApproval) {
           throw new ServiceError('Failed to persist approval decision.', 500);
         }
 
@@ -135,20 +136,6 @@ export class SessionPromptService {
           type: 'approval.resolved'
         });
 
-        const updatedSession = sessionService.updateSessionRuntimeState({
-          lastErrorText: null,
-          sessionId: approval.sessionId,
-          status: 'executing'
-        });
-
-        if (updatedSession) {
-          sessionEventService.append({
-            sessionId: updatedSession.id,
-            type: 'session.updated',
-            updatedAt: updatedSession.updatedAt
-          });
-        }
-
         return {
           approval: updatedApproval,
           toolCall: updatedToolCall
@@ -156,7 +143,7 @@ export class SessionPromptService {
       },
       async (ctx) => {
         await this.runtimeLifecycle.resumeApprovalRun({
-          approval: ctx.approval,
+          approval,
           decision: input.decision,
           toolCall: ctx.toolCall
         });
@@ -167,4 +154,4 @@ export class SessionPromptService {
   }
 }
 
-export const sessionPromptService = new SessionPromptService();
+export const sessionInteractionService = new SessionInteractionService();

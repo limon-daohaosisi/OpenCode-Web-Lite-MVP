@@ -1,26 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type {
   ApprovalDto,
+  CreateMessagePartInput,
   MessageDto,
   MessagePart,
   SessionCheckpoint,
   SessionDto,
   SessionEvent,
   SessionStatus,
+  TokenUsageDto,
   ToolCallDto
 } from '@opencode/shared';
-import type {
-  ResponseFunctionToolCall,
-  ResponseInputItem,
-  ResponseOutputItem
-} from 'openai/resources/responses/responses';
+import type { FinishReason, LanguageModelUsage, TextStreamPart } from 'ai';
 import { buildSessionCheckpoint } from './checkpoint.js';
-import {
-  executeApprovedTool,
-  prepareToolExecution,
-  toolRequiresApproval
-} from './tool-executor.js';
+import type { AiSdkTurnRequest } from './context/schema.js';
 import type { StreamModelResponse } from './model-client.js';
+import { prepareToolExecution } from './tool-executor.js';
 import type { ToolName } from './tools/types.js';
 
 type CreateApprovalInput = {
@@ -40,26 +35,14 @@ type CreateApprovalInput = {
 };
 
 type CreateMessageInput = {
-  content: MessagePart[];
+  content?: CreateMessagePartInput[];
   createdAt?: string;
   id?: string;
+  model?: { modelId: string; providerId: string };
   role: MessageDto['role'];
   sessionId: string;
+  status?: MessageDto['status'];
   taskId?: string;
-};
-
-type CreateToolCallInput = {
-  createdAt: string;
-  id: string;
-  input: Record<string, unknown>;
-  messageId: null | string;
-  requiresApproval: boolean;
-  sessionId: string;
-  startedAt?: string;
-  status: ToolCallDto['status'];
-  taskId: null | string;
-  toolName: ToolName;
-  updatedAt: string;
 };
 
 type UpdateSessionRuntimeStateInput = {
@@ -70,333 +53,567 @@ type UpdateSessionRuntimeStateInput = {
   status?: SessionStatus;
 };
 
+type UpdateMessageRuntimeInput = {
+  errorText?: null | string;
+  finishReason?: null | string;
+  id: string;
+  modelResponseId?: null | string;
+  providerMetadata?: null | Record<string, unknown>;
+  status?: MessageDto['status'];
+  tokenUsage?: null | TokenUsageDto;
+};
+
 export type SessionProcessorDeps = {
+  appendMessagePart(input: CreateMessagePartInput): MessagePart;
   appendSessionEvent(event: SessionEvent): unknown;
   createApproval(input: CreateApprovalInput): ApprovalDto;
   createId?: () => string;
   createMessage(input: CreateMessageInput): MessageDto;
-  createToolCall(input: CreateToolCallInput): ToolCallDto;
-  executeApprovedTool?: typeof executeApprovedTool;
+  createToolPartWithToolCall(input: {
+    part: Extract<MessagePart, { type: 'tool' }>;
+    toolCall: {
+      createdAt: string;
+      id: string;
+      input: Record<string, unknown>;
+      messageId: null | string;
+      messagePartId: string;
+      modelToolCallId: string;
+      providerMetadata?: Record<string, unknown>;
+      requiresApproval: boolean;
+      sessionId: string;
+      startedAt?: string;
+      status: ToolCallDto['status'];
+      taskId: null | string;
+      toolName: ToolName;
+      updatedAt: string;
+    };
+  }): {
+    part: Extract<MessagePart, { type: 'tool' }>;
+    toolCall: ToolCallDto;
+  };
   now?: () => string;
   prepareToolExecution?: typeof prepareToolExecution;
   streamModelResponse: StreamModelResponse;
-  toolRequiresApproval?: typeof toolRequiresApproval;
-  updateMessageContent(id: string, content: MessagePart[]): MessageDto | null;
+  updateMessageRuntime(input: UpdateMessageRuntimeInput): MessageDto | null;
+  updateMessagePart(part: MessagePart): MessagePart | null;
   updateSessionRuntimeState(
     input: UpdateSessionRuntimeStateInput
   ): SessionDto | null;
-  updateToolCall(input: {
-    completedAt?: null | string;
-    errorText?: null | string;
-    id: string;
-    result?: null | Record<string, unknown>;
-    startedAt?: null | string;
-    status: ToolCallDto['status'];
-    updatedAt: string;
-  }): ToolCallDto | null;
+  updateToolPartWithToolCall(input: {
+    part: Extract<MessagePart, { type: 'tool' }>;
+    toolCall: {
+      completedAt?: null | string;
+      errorText?: null | string;
+      id: string;
+      result?: null | Record<string, unknown>;
+      startedAt?: null | string;
+      status: ToolCallDto['status'];
+      updatedAt?: string;
+    };
+  }): {
+    part: Extract<MessagePart, { type: 'tool' }>;
+    toolCall: ToolCallDto;
+  };
 };
 
 export type ProcessTurnInput = {
-  input: string | ResponseInputItem[];
-  previousResponseId?: null | string;
+  request: AiSdkTurnRequest;
   sessionId: string;
   workspaceRoot: string;
 };
 
 export type ProcessorResult =
+  | { finishReason: InternalFinishReason; kind: 'completed' }
   | {
-      kind: 'completed';
-      previousResponseId: string;
+      assistantMessageId: string;
+      kind: 'tool_calls';
+      toolParts: Extract<MessagePart, { type: 'tool' }>[];
     }
-  | {
-      kind: 'continue_with_tool_results';
-      nextInput: ResponseInputItem[];
-      previousResponseId: string;
-    }
-  | {
-      checkpoint: SessionCheckpoint;
-      kind: 'paused_for_approval';
-      previousResponseId: string;
-    };
+  | { checkpoint: SessionCheckpoint; kind: 'paused_for_approval' }
+  | { error: string; kind: 'failed' };
+
+export type InternalFinishReason =
+  | 'cancelled'
+  | 'content-filter'
+  | 'error'
+  | 'length'
+  | 'other'
+  | 'stop'
+  | 'tool-calls'
+  | 'unknown';
 
 type AssistantMessageState = {
   message: MessageDto | null;
-  text: string;
+  nextOrder: number;
+  reasoningParts: Map<string, Extract<MessagePart, { type: 'reasoning' }>>;
+  textParts: Map<string, Extract<MessagePart, { type: 'text' }>>;
+  toolCalls: Map<string, ToolCallDto>;
+  toolInputBuffers: Map<string, string>;
+  toolParts: Extract<MessagePart, { type: 'tool' }>[];
 };
-
-type ExecuteFunctionCallResult =
-  | { kind: 'continue'; output: ResponseInputItem }
-  | { checkpoint: SessionCheckpoint; kind: 'paused_for_approval' };
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown runtime error.';
 }
 
-function isFunctionToolCall(
-  item: ResponseOutputItem | { type: string }
-): item is ResponseFunctionToolCall {
-  return item.type === 'function_call';
+function normalizeFinishReason(
+  finishReason: FinishReason | string | undefined
+): InternalFinishReason {
+  switch (finishReason) {
+    case 'stop':
+    case 'length':
+    case 'tool-calls':
+    case 'content-filter':
+    case 'error':
+    case 'other':
+      return finishReason;
+    default:
+      return 'unknown';
+  }
 }
 
-export function buildFunctionCallOutput(
-  callId: string,
-  payload: Record<string, unknown>
-): ResponseInputItem {
+function normalizeUsage(
+  usage: LanguageModelUsage | undefined
+): TokenUsageDto | undefined {
+  if (!usage) {
+    return undefined;
+  }
+
   return {
-    call_id: callId,
-    output: JSON.stringify(payload),
-    type: 'function_call_output'
+    cacheRead: usage.inputTokenDetails.cacheReadTokens,
+    cacheWrite: usage.inputTokenDetails.cacheWriteTokens,
+    input: usage.inputTokens ?? 0,
+    output: usage.outputTokens ?? 0,
+    reasoning: usage.outputTokenDetails.reasoningTokens,
+    total: usage.totalTokens
   };
+}
+
+function isToolCallEvent(
+  event: TextStreamPart<AiSdkTurnRequest['tools']>
+): event is Extract<
+  TextStreamPart<AiSdkTurnRequest['tools']>,
+  { type: 'tool-call' }
+> {
+  return event.type === 'tool-call';
 }
 
 export class SessionProcessor {
   constructor(private readonly deps: SessionProcessorDeps) {}
 
   async processTurn(input: ProcessTurnInput): Promise<ProcessorResult> {
-    const assistantState: AssistantMessageState = {
+    const state: AssistantMessageState = {
       message: null,
-      text: ''
+      nextOrder: 0,
+      reasoningParts: new Map(),
+      textParts: new Map(),
+      toolCalls: new Map(),
+      toolInputBuffers: new Map(),
+      toolParts: []
     };
-    const stream = this.deps.streamModelResponse({
-      input: input.input,
-      previousResponseId: input.previousResponseId
-    });
+    const stream = this.deps.streamModelResponse(input.request);
+    let finishReason: InternalFinishReason = 'unknown';
+    let providerMetadata: Record<string, unknown> | undefined;
+    let tokenUsage: TokenUsageDto | undefined;
+    let modelResponseId: string | undefined;
 
-    for await (const event of stream) {
-      if (event.type !== 'response.output_text.delta') {
-        continue;
-      }
+    try {
+      for await (const event of stream.fullStream) {
+        if (event.type === 'text-delta') {
+          await this.applyTextDelta(
+            input.sessionId,
+            state,
+            event.id,
+            event.text
+          );
+        } else if (event.type === 'reasoning-delta') {
+          await this.applyReasoningDelta(
+            input.sessionId,
+            state,
+            event.id,
+            event.text
+          );
+        } else if (event.type === 'tool-input-delta') {
+          state.toolInputBuffers.set(
+            event.id,
+            `${state.toolInputBuffers.get(event.id) ?? ''}${event.delta}`
+          );
+        } else if (event.type === 'tool-call') {
+          const outcome = await this.persistToolCall(input, state, event);
 
-      const message = await this.ensureAssistantMessage(
-        input.sessionId,
-        assistantState
-      );
-      assistantState.text += event.delta;
-      assistantState.message =
-        this.deps.updateMessageContent(message.id, [
-          {
-            text: assistantState.text,
-            type: 'text'
+          if (outcome.kind === 'failed') {
+            return outcome;
           }
-        ]) ?? message;
-
-      this.deps.appendSessionEvent({
-        delta: event.delta,
-        messageId: message.id,
-        sessionId: input.sessionId,
-        type: 'message.delta'
-      });
+        } else if (event.type === 'finish-step') {
+          finishReason = normalizeFinishReason(event.finishReason);
+          providerMetadata = event.providerMetadata as
+            | Record<string, unknown>
+            | undefined;
+          tokenUsage = normalizeUsage(event.usage);
+          modelResponseId = event.response.id;
+        } else if (event.type === 'finish') {
+          finishReason = normalizeFinishReason(event.finishReason);
+          tokenUsage = normalizeUsage(event.totalUsage);
+        } else if (event.type === 'error') {
+          return await this.failAssistantMessage(
+            input.sessionId,
+            state,
+            event.error
+          );
+        }
+      }
+    } catch (error) {
+      return await this.failAssistantMessage(input.sessionId, state, error);
     }
 
-    const finalResponse = await stream.finalResponse();
-    const previousResponseId = finalResponse.id;
-
-    if (assistantState.message) {
+    if (state.message) {
+      this.deps.updateMessageRuntime({
+        finishReason,
+        id: state.message.id,
+        modelResponseId,
+        providerMetadata,
+        status: 'completed',
+        tokenUsage
+      });
       this.deps.appendSessionEvent({
-        messageId: assistantState.message.id,
+        messageId: state.message.id,
         sessionId: input.sessionId,
         type: 'message.completed'
       });
     }
 
-    const functionCalls = finalResponse.output.reduce<
-      ResponseFunctionToolCall[]
-    >((calls, item) => {
-      if (isFunctionToolCall(item)) {
-        calls.push(item);
-      }
-
-      return calls;
-    }, []);
-
-    if (functionCalls.length === 0) {
-      const checkpoint = buildSessionCheckpoint({
-        kind: 'executing_task',
-        previousResponseId
-      });
-      const updatedSession = this.deps.updateSessionRuntimeState({
-        lastCheckpoint: checkpoint,
+    if (state.toolParts.length === 0) {
+      this.updateSession(input.sessionId, {
+        lastCheckpoint: buildSessionCheckpoint({ kind: 'executing_task' }),
         lastErrorText: null,
-        sessionId: input.sessionId,
         status: 'executing'
       });
 
-      if (updatedSession) {
-        this.deps.appendSessionEvent({
-          sessionId: updatedSession.id,
-          type: 'session.updated',
-          updatedAt: updatedSession.updatedAt
-        });
-      }
-
       return {
-        kind: 'completed',
-        previousResponseId
+        finishReason,
+        kind: 'completed'
       };
     }
 
-    const nextInput: ResponseInputItem[] = [];
+    const approvalParts = state.toolParts.filter(
+      (part) =>
+        input.request.toolPolicies[part.toolName]?.approval === 'required'
+    );
+    const [approvalPart] = approvalParts;
 
-    for (const functionCall of functionCalls) {
-      const outcome = await this.executeFunctionCall({
-        assistantMessageId: assistantState.message?.id,
-        functionCall,
-        previousResponseId,
-        sessionId: input.sessionId,
-        workspaceRoot: input.workspaceRoot
-      });
+    if (approvalParts.length > 1) {
+      const error = 'Multiple approval-required tool calls are not supported.';
 
-      if (outcome.kind === 'paused_for_approval') {
+      this.failToolParts(input.sessionId, state, approvalParts, error);
+
+      return { error, kind: 'failed' };
+    }
+
+    if (approvalPart) {
+      const toolCall = state.toolCalls.get(approvalPart.id);
+
+      if (!toolCall) {
         return {
-          checkpoint: outcome.checkpoint,
-          kind: 'paused_for_approval',
-          previousResponseId
+          error: `Tool call row not found for part ${approvalPart.id}.`,
+          kind: 'failed'
         };
       }
 
-      nextInput.push(outcome.output);
+      const checkpoint = await this.createApprovalCheckpoint({
+        input,
+        part: approvalPart,
+        toolCall
+      });
+
+      return {
+        checkpoint,
+        kind: 'paused_for_approval'
+      };
     }
 
     return {
-      kind: 'continue_with_tool_results',
-      nextInput,
-      previousResponseId
+      assistantMessageId: state.message?.id ?? '',
+      kind: 'tool_calls',
+      toolParts: state.toolParts
     };
   }
 
-  async executeApprovedToolCall(input: {
-    callId: string;
-    decision: 'approved' | 'rejected';
-    sessionId: string;
-    toolCall: ToolCallDto;
-    workspaceRoot: string;
-  }): Promise<ResponseInputItem> {
-    const toolName = input.toolCall.toolName as ToolName;
-    const now = this.now();
+  private async applyTextDelta(
+    sessionId: string,
+    state: AssistantMessageState,
+    streamPartId: string,
+    delta: string
+  ) {
+    const message = await this.ensureAssistantMessage(sessionId, state);
+    const existing = state.textParts.get(streamPartId);
 
-    if (input.decision === 'rejected') {
-      const payload = {
-        error: 'Approval rejected by user',
-        ok: false,
-        rejected: true
-      };
+    if (!existing) {
+      const part = this.deps.appendMessagePart({
+        messageId: message.id,
+        order: state.nextOrder++,
+        sessionId,
+        text: delta,
+        type: 'text'
+      }) as Extract<MessagePart, { type: 'text' }>;
 
-      await this.createToolResultMessage({
-        payload,
-        sessionId: input.sessionId,
-        toolName
-      });
+      state.textParts.set(streamPartId, part);
+    } else {
+      const updated = this.deps.updateMessagePart({
+        ...existing,
+        text: existing.text + delta
+      }) as Extract<MessagePart, { type: 'text' }> | null;
 
-      this.deps.appendSessionEvent({
-        error: 'Approval rejected by user',
-        sessionId: input.sessionId,
-        toolCallId: input.toolCall.id,
-        type: 'tool.failed'
-      });
-
-      return buildFunctionCallOutput(input.callId, payload);
+      if (updated) {
+        state.textParts.set(streamPartId, updated);
+      }
     }
 
-    this.deps.updateToolCall({
-      id: input.toolCall.id,
-      startedAt: now,
-      status: 'running',
-      updatedAt: now
-    });
-
     this.deps.appendSessionEvent({
-      sessionId: input.sessionId,
-      toolCallId: input.toolCall.id,
-      type: 'tool.running'
+      delta,
+      messageId: message.id,
+      sessionId,
+      type: 'message.delta'
     });
+  }
 
-    try {
-      const result = await this.executeApprovedTool(
-        toolName as Extract<ToolName, 'run_command' | 'write_file'>,
-        input.toolCall.input,
-        input.workspaceRoot
-      );
-      const completedAt = this.now();
-      const completedToolCall = this.deps.updateToolCall({
-        completedAt,
-        id: input.toolCall.id,
-        result,
-        startedAt: now,
-        status: 'completed',
-        updatedAt: completedAt
-      });
+  private async applyReasoningDelta(
+    sessionId: string,
+    state: AssistantMessageState,
+    streamPartId: string,
+    delta: string
+  ) {
+    const message = await this.ensureAssistantMessage(sessionId, state);
+    const existing = state.reasoningParts.get(streamPartId);
 
-      await this.createToolResultMessage({
-        payload: result,
-        sessionId: input.sessionId,
-        toolName
-      });
+    if (!existing) {
+      const part = this.deps.appendMessagePart({
+        messageId: message.id,
+        order: state.nextOrder++,
+        sessionId,
+        text: delta,
+        type: 'reasoning'
+      }) as Extract<MessagePart, { type: 'reasoning' }>;
 
-      if (completedToolCall) {
-        this.deps.appendSessionEvent({
-          sessionId: input.sessionId,
-          toolCall: completedToolCall,
-          type: 'tool.completed'
-        });
-      }
+      state.reasoningParts.set(streamPartId, part);
+      return;
+    }
 
-      return buildFunctionCallOutput(input.callId, result);
-    } catch (error) {
-      const errorMessage = formatError(error);
-      const payload = { error: errorMessage, ok: false };
-      const completedAt = this.now();
+    const updated = this.deps.updateMessagePart({
+      ...existing,
+      text: existing.text + delta
+    }) as Extract<MessagePart, { type: 'reasoning' }> | null;
 
-      this.deps.updateToolCall({
-        completedAt,
-        errorText: errorMessage,
-        id: input.toolCall.id,
-        result: payload,
-        startedAt: now,
-        status: 'failed',
-        updatedAt: completedAt
-      });
-
-      await this.createToolResultMessage({
-        payload,
-        sessionId: input.sessionId,
-        toolName
-      });
-
-      this.deps.appendSessionEvent({
-        error: errorMessage,
-        sessionId: input.sessionId,
-        toolCallId: input.toolCall.id,
-        type: 'tool.failed'
-      });
-
-      return buildFunctionCallOutput(input.callId, payload);
+    if (updated) {
+      state.reasoningParts.set(streamPartId, updated);
     }
   }
 
-  private async createToolResultMessage(input: {
-    payload: Record<string, unknown>;
-    sessionId: string;
-    toolName: ToolName;
-  }) {
-    const message = this.deps.createMessage({
-      content: [
-        {
-          content: input.payload,
-          toolName: input.toolName,
-          type: 'tool_result'
+  private async persistToolCall(
+    input: ProcessTurnInput,
+    state: AssistantMessageState,
+    event: Extract<
+      TextStreamPart<AiSdkTurnRequest['tools']>,
+      { type: 'tool-call' }
+    >
+  ): Promise<{ kind: 'ok' } | { error: string; kind: 'failed' }> {
+    if (!isToolCallEvent(event)) {
+      return { kind: 'ok' };
+    }
+
+    const policy = input.request.toolPolicies[event.toolName];
+
+    if (!policy?.enabled) {
+      return {
+        error: `Tool is not enabled: ${event.toolName}`,
+        kind: 'failed'
+      };
+    }
+
+    if (!event.toolCallId) {
+      return {
+        error: `Tool call for ${event.toolName} is missing toolCallId.`,
+        kind: 'failed'
+      };
+    }
+
+    const message = await this.ensureAssistantMessage(input.sessionId, state);
+    const now = this.now();
+    const toolCallId = this.createId();
+    const partId = this.createId();
+    const toolName = event.toolName as ToolName;
+    const toolPart: Extract<MessagePart, { type: 'tool' }> = {
+      createdAt: now,
+      id: partId,
+      messageId: message.id,
+      modelToolCallId: event.toolCallId,
+      order: state.nextOrder++,
+      providerMetadata: event.providerMetadata as
+        | Record<string, unknown>
+        | undefined,
+      sessionId: input.sessionId,
+      state: {
+        input: event.input as Record<string, unknown>,
+        rawInput: state.toolInputBuffers.get(event.toolCallId),
+        status: 'pending'
+      },
+      toolCallId,
+      toolName,
+      type: 'tool',
+      updatedAt: now
+    };
+    const { part: createdPart, toolCall } =
+      this.deps.createToolPartWithToolCall({
+        part: toolPart,
+        toolCall: {
+          createdAt: now,
+          id: toolCallId,
+          input: event.input as Record<string, unknown>,
+          messageId: message.id,
+          messagePartId: toolPart.id,
+          modelToolCallId: event.toolCallId,
+          providerMetadata: event.providerMetadata as
+            | Record<string, unknown>
+            | undefined,
+          requiresApproval: policy.approval === 'required',
+          sessionId: input.sessionId,
+          status:
+            policy.approval === 'required' ? 'pending_approval' : 'pending',
+          taskId: null,
+          toolName,
+          updatedAt: now
         }
-      ],
-      role: 'tool',
-      sessionId: input.sessionId
+      });
+
+    state.toolParts.push(createdPart);
+    state.toolCalls.set(createdPart.id, toolCall);
+
+    return { kind: 'ok' };
+  }
+
+  private async createApprovalCheckpoint(input: {
+    input: ProcessTurnInput;
+    part: Extract<MessagePart, { type: 'tool' }>;
+    toolCall: ToolCallDto;
+  }) {
+    const approvalPayload = await this.prepareToolExecution(
+      input.part.toolName as ToolName,
+      input.part.state.input,
+      input.input.workspaceRoot
+    );
+
+    if (approvalPayload.kind !== 'approval') {
+      throw new Error('Expected approval payload for approval-required tool.');
+    }
+
+    const now = this.now();
+    const approval = this.deps.createApproval({
+      createdAt: now,
+      decisionReasonText: null,
+      decidedAt: null,
+      decidedBy: null,
+      decisionScope: 'once',
+      id: this.createId(),
+      kind: input.part.toolName as ApprovalDto['kind'],
+      payload: approvalPayload.payload,
+      sessionId: input.input.sessionId,
+      status: 'pending',
+      suggestedRuleJson: null,
+      taskId: null,
+      toolCallId: input.part.toolCallId
+    });
+    const checkpoint = buildSessionCheckpoint({
+      approvalId: approval.id,
+      kind: 'waiting_approval',
+      messageId: input.part.messageId,
+      modelToolCallId: input.part.modelToolCallId,
+      partId: input.part.id,
+      toolCallId: input.part.toolCallId
     });
 
     this.deps.appendSessionEvent({
-      message,
-      sessionId: input.sessionId,
-      type: 'message.created'
+      approval,
+      sessionId: input.input.sessionId,
+      toolCall: input.toolCall,
+      type: 'tool.pending'
+    });
+    this.deps.appendSessionEvent({
+      approval,
+      sessionId: input.input.sessionId,
+      type: 'approval.created'
     });
 
-    return message;
+    const updatedSession = this.deps.updateSessionRuntimeState({
+      lastCheckpoint: checkpoint,
+      sessionId: input.input.sessionId,
+      status: 'waiting_approval'
+    });
+
+    this.deps.appendSessionEvent({
+      checkpoint,
+      sessionId: input.input.sessionId,
+      type: 'session.resumable'
+    });
+
+    if (updatedSession) {
+      this.deps.appendSessionEvent({
+        sessionId: updatedSession.id,
+        type: 'session.updated',
+        updatedAt: updatedSession.updatedAt
+      });
+    }
+
+    return checkpoint;
+  }
+
+  private failToolParts(
+    sessionId: string,
+    state: AssistantMessageState,
+    parts: Extract<MessagePart, { type: 'tool' }>[],
+    errorText: string
+  ) {
+    const completedAt = this.now();
+    const payload = { error: errorText, ok: false };
+
+    for (const part of parts) {
+      const failedPart: Extract<MessagePart, { type: 'tool' }> = {
+        ...part,
+        state: {
+          completedAt,
+          errorText,
+          input: part.state.input,
+          payload,
+          reason: 'interrupted',
+          status: 'error'
+        }
+      };
+
+      this.deps.updateToolPartWithToolCall({
+        part: failedPart,
+        toolCall: {
+          completedAt,
+          errorText,
+          id: part.toolCallId,
+          result: payload,
+          status: 'failed',
+          updatedAt: completedAt
+        }
+      });
+      this.deps.appendSessionEvent({
+        error: errorText,
+        sessionId,
+        toolCallId: part.toolCallId,
+        type: 'tool.failed'
+      });
+    }
+
+    if (state.message) {
+      this.deps.updateMessageRuntime({
+        errorText,
+        finishReason: 'error',
+        id: state.message.id,
+        status: 'failed'
+      });
+    }
   }
 
   private async ensureAssistantMessage(
@@ -410,7 +627,8 @@ export class SessionProcessor {
     const message = this.deps.createMessage({
       content: [],
       role: 'assistant',
-      sessionId
+      sessionId,
+      status: 'running'
     });
 
     state.message = message;
@@ -422,236 +640,34 @@ export class SessionProcessor {
     return message;
   }
 
-  private async executeFunctionCall(input: {
-    assistantMessageId?: string;
-    functionCall: ResponseFunctionToolCall;
-    previousResponseId: string;
-    sessionId: string;
-    workspaceRoot: string;
-  }): Promise<ExecuteFunctionCallResult> {
-    const now = this.now();
-    const rawInput = this.parseFunctionArguments(input.functionCall);
-    const toolName = input.functionCall.name as ToolName;
+  private async failAssistantMessage(
+    sessionId: string,
+    state: AssistantMessageState,
+    error: unknown
+  ): Promise<ProcessorResult> {
+    const errorMessage = formatError(error);
 
-    if (!toolName) {
-      throw new Error('Function tool call is missing a valid tool name.');
-    }
-
-    if (this.toolRequiresApproval(toolName)) {
-      const toolCall = this.deps.createToolCall({
-        createdAt: now,
-        id: this.createId(),
-        input: rawInput,
-        messageId: input.assistantMessageId ?? null,
-        requiresApproval: true,
-        sessionId: input.sessionId,
-        status: 'pending_approval',
-        taskId: null,
-        toolName,
-        updatedAt: now
-      });
-      const approvalPayload = await this.prepareToolExecution(
-        toolName,
-        rawInput,
-        input.workspaceRoot
-      );
-
-      if (approvalPayload.kind !== 'approval') {
-        throw new Error(
-          'Expected approval payload for approval-required tool.'
-        );
-      }
-
-      const approval = this.deps.createApproval({
-        createdAt: now,
-        decisionReasonText: null,
-        decidedAt: null,
-        decidedBy: null,
-        decisionScope: 'once',
-        id: this.createId(),
-        kind: toolName,
-        payload: approvalPayload.payload,
-        sessionId: input.sessionId,
-        status: 'pending',
-        suggestedRuleJson: null,
-        taskId: null,
-        toolCallId: toolCall.id
-      });
-
-      this.deps.appendSessionEvent({
-        approval,
-        sessionId: input.sessionId,
-        toolCall,
-        type: 'tool.pending'
-      });
-      this.deps.appendSessionEvent({
-        approval,
-        sessionId: input.sessionId,
-        type: 'approval.created'
-      });
-
-      const checkpoint = buildSessionCheckpoint({
-        approvalId: approval.id,
-        callId: input.functionCall.call_id,
-        kind: 'waiting_approval',
-        previousResponseId: input.previousResponseId,
-        toolCallId: toolCall.id
-      });
-      const updatedSession = this.deps.updateSessionRuntimeState({
-        lastCheckpoint: checkpoint,
-        sessionId: input.sessionId,
-        status: 'waiting_approval'
-      });
-
-      this.deps.appendSessionEvent({
-        checkpoint,
-        sessionId: input.sessionId,
-        type: 'session.resumable'
-      });
-
-      if (updatedSession) {
-        this.deps.appendSessionEvent({
-          sessionId: updatedSession.id,
-          type: 'session.updated',
-          updatedAt: updatedSession.updatedAt
-        });
-      }
-
-      return {
-        checkpoint,
-        kind: 'paused_for_approval'
-      };
-    }
-
-    const runningToolCall = this.deps.createToolCall({
-      createdAt: now,
-      id: this.createId(),
-      input: rawInput,
-      messageId: input.assistantMessageId ?? null,
-      requiresApproval: false,
-      sessionId: input.sessionId,
-      startedAt: now,
-      status: 'running',
-      taskId: null,
-      toolName,
-      updatedAt: now
-    });
-
-    this.deps.appendSessionEvent({
-      sessionId: input.sessionId,
-      toolCallId: runningToolCall.id,
-      type: 'tool.running'
-    });
-
-    try {
-      const prepared = await this.prepareToolExecution(
-        toolName,
-        rawInput,
-        input.workspaceRoot
-      );
-
-      if (prepared.kind !== 'auto') {
-        throw new Error('Expected auto-executed tool result.');
-      }
-
-      const completedAt = this.now();
-      const completedToolCall = this.deps.updateToolCall({
-        completedAt,
-        id: runningToolCall.id,
-        result: prepared.output,
-        startedAt: now,
-        status: 'completed',
-        updatedAt: completedAt
-      });
-
-      if (!completedToolCall) {
-        throw new Error('Failed to persist completed tool call.');
-      }
-
-      await this.createToolResultMessage({
-        payload: prepared.output,
-        sessionId: input.sessionId,
-        toolName
-      });
-
-      this.deps.appendSessionEvent({
-        sessionId: input.sessionId,
-        toolCall: completedToolCall,
-        type: 'tool.completed'
-      });
-
-      return {
-        kind: 'continue',
-        output: buildFunctionCallOutput(
-          input.functionCall.call_id,
-          prepared.output
-        )
-      };
-    } catch (error) {
-      const errorMessage = formatError(error);
-      const payload = {
-        error: errorMessage,
-        ok: false
-      };
-      const completedAt = this.now();
-      const failedToolCall = this.deps.updateToolCall({
-        completedAt,
+    if (state.message) {
+      this.deps.updateMessageRuntime({
         errorText: errorMessage,
-        id: runningToolCall.id,
-        result: payload,
-        startedAt: now,
-        status: 'failed',
-        updatedAt: completedAt
+        finishReason: 'error',
+        id: state.message.id,
+        status: 'failed'
       });
-
-      await this.createToolResultMessage({
-        payload,
-        sessionId: input.sessionId,
-        toolName
-      });
-
-      this.deps.appendSessionEvent({
-        error: errorMessage,
-        sessionId: input.sessionId,
-        toolCallId: failedToolCall?.id ?? runningToolCall.id,
-        type: 'tool.failed'
-      });
-
-      return {
-        kind: 'continue',
-        output: buildFunctionCallOutput(input.functionCall.call_id, payload)
-      };
     }
+
+    return {
+      error: errorMessage,
+      kind: 'failed'
+    };
   }
 
   private createId() {
     return this.deps.createId?.() ?? randomUUID();
   }
 
-  private executeApprovedTool(
-    toolName: Extract<ToolName, 'run_command' | 'write_file'>,
-    rawInput: Record<string, unknown>,
-    workspaceRoot: string
-  ) {
-    return (this.deps.executeApprovedTool ?? executeApprovedTool)(
-      toolName,
-      rawInput,
-      workspaceRoot
-    );
-  }
-
   private now() {
     return this.deps.now?.() ?? new Date().toISOString();
-  }
-
-  private parseFunctionArguments(functionCall: ResponseFunctionToolCall) {
-    try {
-      return JSON.parse(functionCall.arguments) as Record<string, unknown>;
-    } catch {
-      throw new Error(
-        `Failed to parse arguments for tool ${functionCall.name}.`
-      );
-    }
   }
 
   private prepareToolExecution(
@@ -666,7 +682,21 @@ export class SessionProcessor {
     );
   }
 
-  private toolRequiresApproval(toolName: ToolName) {
-    return (this.deps.toolRequiresApproval ?? toolRequiresApproval)(toolName);
+  private updateSession(
+    sessionId: string,
+    state: Omit<UpdateSessionRuntimeStateInput, 'sessionId'>
+  ) {
+    const updatedSession = this.deps.updateSessionRuntimeState({
+      ...state,
+      sessionId
+    });
+
+    if (updatedSession) {
+      this.deps.appendSessionEvent({
+        sessionId: updatedSession.id,
+        type: 'session.updated',
+        updatedAt: updatedSession.updatedAt
+      });
+    }
   }
 }

@@ -1,7 +1,7 @@
 import { approvals } from '@opencode/orm';
 import type { ApprovalRow, NewApproval } from '@opencode/orm';
 import type { ApprovalDto, ApprovalStatus } from '@opencode/shared';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { parseJsonValue, stringifyJsonValue } from '../lib/json.js';
 
@@ -51,6 +51,18 @@ export const approvalRepository = {
     return row ? mapApprovalRow(row) : null;
   },
 
+  listPendingBySession(sessionId: string): ApprovalDto[] {
+    return db
+      .select()
+      .from(approvals)
+      .where(
+        and(eq(approvals.sessionId, sessionId), eq(approvals.status, 'pending'))
+      )
+      .orderBy(asc(approvals.createdAt), asc(approvals.id))
+      .all()
+      .map(mapApprovalRow);
+  },
+
   updateDecision(input: UpdateApprovalDecisionInput): ApprovalDto | null {
     const row = db
       .update(approvals)
@@ -58,7 +70,7 @@ export const approvalRepository = {
         decidedAt: input.decidedAt,
         status: input.status
       })
-      .where(eq(approvals.id, input.id))
+      .where(and(eq(approvals.id, input.id), eq(approvals.status, 'pending')))
       .returning()
       .get();
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
-import { sessionStreamHub } from '../services/session/stream-hub.js';
+import { sessionStreamHub } from '../lib/session-stream-hub.js';
 import { dbTestContext, resetTestDatabase } from './db-test-context.js';
 
 const {

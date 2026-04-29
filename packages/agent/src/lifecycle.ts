@@ -1,17 +1,15 @@
 import type {
   ApprovalDto,
+  MessagePart,
   SessionDto,
   SessionEvent,
   SessionStatus,
   ToolCallDto
 } from '@opencode/shared';
-import {
-  getCheckpointCallId,
-  getCheckpointPreviousResponseId,
-  parseSessionCheckpoint
-} from './checkpoint.js';
+import { validateApprovalResume } from './approval-resume.js';
+import { parseSessionCheckpoint } from './checkpoint.js';
 import type { RunLoop, RunLoopResult } from './run-loop.js';
-import type { SessionProcessor } from './session-processor.js';
+import type { ToolExecutor } from './tool-executor.js';
 
 type UpdateSessionRuntimeStateInput = {
   currentTaskId?: null | string;
@@ -23,16 +21,16 @@ type UpdateSessionRuntimeStateInput = {
 
 export type LifecycleDeps = {
   appendSessionEvent(event: SessionEvent): unknown;
+  getMessagePart(partId: string): MessagePart | null;
   getSession(sessionId: string): SessionDto | null;
   getWorkspaceRootPath(sessionId: string): string;
-  processor: Pick<SessionProcessor, 'executeApprovedToolCall'>;
+  toolExecutor: Pick<ToolExecutor, 'executeApprovedPart'>;
   updateSessionRuntimeState(
     input: UpdateSessionRuntimeStateInput
   ): SessionDto | null;
 };
 
 type StartPromptRunInput = {
-  input: string;
   sessionId: string;
 };
 
@@ -69,32 +67,39 @@ export class Lifecycle {
       }
 
       const checkpoint = parseSessionCheckpoint(session.lastCheckpointJson);
-      const previousResponseId = getCheckpointPreviousResponseId(checkpoint);
-      const callId = getCheckpointCallId(checkpoint);
 
-      if (!previousResponseId || !callId) {
-        throw new Error(
-          'Session checkpoint is missing OpenAI continuation data.'
-        );
+      const part = checkpoint?.partId
+        ? this.deps.getMessagePart(checkpoint.partId)
+        : null;
+      const resumeValidation = validateApprovalResume({
+        approval: input.approval,
+        checkpoint,
+        part,
+        session,
+        toolCall: input.toolCall
+      });
+
+      if (!resumeValidation.ok) {
+        throw new Error(resumeValidation.reason);
       }
 
-      const workspaceRoot = this.deps.getWorkspaceRootPath(
-        input.approval.sessionId
-      );
-      const functionCallOutput =
-        await this.deps.processor.executeApprovedToolCall({
-          callId,
-          decision: input.decision,
-          sessionId: input.approval.sessionId,
-          toolCall: input.toolCall,
-          workspaceRoot
-        });
+      await this.deps.toolExecutor.executeApprovedPart({
+        decision: input.decision,
+        part: resumeValidation.context.part,
+        sessionId: input.approval.sessionId,
+        workspaceRoot: this.deps.getWorkspaceRootPath(input.approval.sessionId)
+      });
+
+      this.deps.updateSessionRuntimeState({
+        lastCheckpoint: null,
+        lastErrorText: null,
+        sessionId: input.approval.sessionId,
+        status: 'executing'
+      });
 
       const result = await this.loop.run({
-        input: [functionCallOutput],
-        previousResponseId,
         sessionId: input.approval.sessionId,
-        workspaceRoot
+        workspaceRoot: this.deps.getWorkspaceRootPath(input.approval.sessionId)
       });
 
       return { reason: result.kind };
@@ -111,10 +116,7 @@ export class Lifecycle {
         throw new Error(`Session not found: ${input.sessionId}`);
       }
 
-      const checkpoint = parseSessionCheckpoint(session.lastCheckpointJson);
       const result = await this.loop.run({
-        input: input.input,
-        previousResponseId: getCheckpointPreviousResponseId(checkpoint),
         sessionId: input.sessionId,
         workspaceRoot: this.deps.getWorkspaceRootPath(input.sessionId)
       });

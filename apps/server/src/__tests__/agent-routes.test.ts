@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
-import { sessionPromptService } from '../services/session/prompt-service.js';
+import { sessionInteractionService } from '../services/agent/interaction-service.js';
 import { dbTestContext, resetTestDatabase } from './db-test-context.js';
 import { parseJson } from './server-test-helpers.js';
 
@@ -23,9 +23,9 @@ afterEach(() => {
   resetTestDatabase();
 });
 
-test('POST /api/sessions/:sessionId/messages delegates to SessionPromptService and returns 202', async () => {
+test('POST /api/sessions/:sessionId/messages delegates to SessionInteractionService and returns 202', async () => {
   const prompt = mock.method(
-    sessionPromptService,
+    sessionInteractionService,
     'prompt',
     async (input: { content: string; sessionId: string }) => {
       assert.deepEqual(input, {
@@ -71,10 +71,10 @@ test('POST /api/sessions/:sessionId/messages delegates to SessionPromptService a
 });
 
 test('agent routes map ServiceError instances to HTTP errors', async () => {
-  mock.method(sessionPromptService, 'prompt', async () => {
+  mock.method(sessionInteractionService, 'prompt', async () => {
     throw new ServiceError('Session already has an active run.', 409);
   });
-  mock.method(sessionPromptService, 'resolveApproval', async () => {
+  mock.method(sessionInteractionService, 'resolveApproval', async () => {
     throw new ServiceError('Approval not found: missing-approval', 404);
   });
 
@@ -107,11 +107,11 @@ test('agent routes map ServiceError instances to HTTP errors', async () => {
   );
 });
 
-test('approval routes delegate approve and reject decisions to SessionPromptService', async () => {
+test('approval routes delegate approve and reject decisions to SessionInteractionService', async () => {
   const decisions: Array<{ approvalId: string; decision: string }> = [];
 
   mock.method(
-    sessionPromptService,
+    sessionInteractionService,
     'resolveApproval',
     async (input: {
       approvalId: string;

@@ -7,10 +7,10 @@ import type {
   MessageStatus,
   TokenUsageDto
 } from '@opencode/shared';
-import { ServiceError } from '../../lib/service-error.js';
-import { messageRepository } from '../../repositories/message-repository.js';
-import { messagePartRepository } from '../../repositories/message-part-repository.js';
-import { sessionRepository } from '../../repositories/session-repository.js';
+import { ServiceError } from '../../../lib/service-error.js';
+import { messageRepository } from '../../../repositories/message-repository.js';
+import { messagePartRepository } from '../../../repositories/message-part-repository.js';
+import { sessionRepository } from '../../../repositories/session-repository.js';
 
 type CreateMessageInput = {
   agentName?: string;

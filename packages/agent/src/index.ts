@@ -2,6 +2,12 @@ export {
   buildSessionCheckpoint,
   parseSessionCheckpoint
 } from './checkpoint.js';
+export { validateApprovalResume } from './approval-resume.js';
+export type {
+  ApprovalResumeContext,
+  ApprovalResumeValidationInput,
+  ApprovalResumeValidationResult
+} from './approval-resume.js';
 export { Lifecycle } from './lifecycle.js';
 export type {
   LifecycleDeps,

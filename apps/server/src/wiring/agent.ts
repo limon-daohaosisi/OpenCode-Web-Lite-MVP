@@ -12,28 +12,29 @@ import { approvalRepository } from '../repositories/approval-repository.js';
 import { workspaceRepository } from '../repositories/workspace-repository.js';
 import { createLanguageModel } from '../services/ai/provider.js';
 import { streamModelResponse } from '../services/ai/response-stream.js';
-import { messageService } from '../services/session/message-service.js';
-import { partService } from '../services/session/part-service.js';
-import { sessionEventService } from '../services/session/event-service.js';
+import { messageService } from '../services/session/message/service.js';
+import { messagePartService } from '../services/session/message/part-service.js';
+import { sessionEventService } from '../services/session-events/event-service.js';
 import { sessionService } from '../services/session/service.js';
+import { toolStateService } from '../services/agent/tool-state-service.js';
 
 export function buildSessionProcessorDeps(
   overrides: Partial<SessionProcessorDeps> = {}
 ): SessionProcessorDeps {
   return {
-    appendMessagePart: (input) => partService.appendPart(input),
+    appendMessagePart: (input) => messagePartService.appendPart(input),
     appendSessionEvent: (event) => sessionEventService.append(event),
     createApproval: (input) => approvalRepository.create(input),
     createMessage: (input) => messageService.createMessage(input),
     createToolPartWithToolCall: (input) =>
-      partService.createToolPartWithToolCall(input),
+      toolStateService.createToolPartWithToolCall(input),
     streamModelResponse,
-    updateMessagePart: (part) => partService.updatePart(part),
+    updateMessagePart: (part) => messagePartService.updatePart(part),
     updateMessageRuntime: (input) => messageService.updateMessageRuntime(input),
     updateSessionRuntimeState: (input) =>
       sessionService.updateSessionRuntimeState(input),
     updateToolPartWithToolCall: (input) =>
-      partService.updateToolPartWithToolCall(input),
+      toolStateService.updateToolPartWithToolCall(input),
     ...overrides
   };
 }
@@ -44,9 +45,9 @@ export const sessionProcessor = new SessionProcessor(
 
 export const toolExecutor = new ToolExecutor({
   appendSessionEvent: (event) => sessionEventService.append(event),
-  getMessagePart: (partId) => partService.getPart(partId),
+  getMessagePart: (partId) => messagePartService.getPart(partId),
   updateToolPartWithToolCall: (input) =>
-    partService.updateToolPartWithToolCall(input)
+    toolStateService.updateToolPartWithToolCall(input)
 });
 
 function getWorkspaceRootPath(sessionId: string) {
@@ -70,7 +71,7 @@ export function buildLifecycleDeps(
 ): LifecycleDeps {
   return {
     appendSessionEvent: (event) => sessionEventService.append(event),
-    getMessagePart: (partId) => partService.getPart(partId),
+    getMessagePart: (partId) => messagePartService.getPart(partId),
     getSession: (sessionId) => sessionService.getSession(sessionId),
     getWorkspaceRootPath,
     toolExecutor,
@@ -93,7 +94,7 @@ export function buildRunLoopDeps(
         return input.part;
       }
 
-      return partService.updateToolPartWithToolCall({
+      return toolStateService.updateToolPartWithToolCall({
         part: input.part,
         toolCall: {
           completedAt: input.part.state.completedAt,

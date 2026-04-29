@@ -8,131 +8,19 @@ import { approvalRepository } from '../../repositories/approval-repository.js';
 import { toolCallRepository } from '../../repositories/tool-call-repository.js';
 import { ServiceError } from '../../lib/service-error.js';
 import { lifecycle } from '../../wiring/agent.js';
-import { messageService } from './message-service.js';
-import { partService } from './part-service.js';
+import { messageService } from '../session/message/service.js';
 import type { SessionRunner } from './runner.js';
 import { sessionRunner } from './runner.js';
-import { sessionService } from './service.js';
-import { sessionEventService } from './event-service.js';
+import { sessionService } from '../session/service.js';
+import { sessionResumeService } from '../session/resume-service.js';
+import { sessionEventService } from '../session-events/event-service.js';
 
 type SubmitUserMessageInput = {
   content: string;
   sessionId: string;
 };
 
-function parseCheckpoint(raw: string | undefined) {
-  if (!raw) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(raw) as
-      | {
-          approvalId?: string;
-          kind?: string;
-          messageId?: string;
-          modelToolCallId?: string;
-          partId?: string;
-          toolCallId?: string;
-        }
-      | undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function assertApprovalResumeReady(input: {
-  approval: ApprovalDto;
-  toolCall: ToolCallDto;
-}) {
-  const session = sessionService.getSession(input.approval.sessionId);
-
-  if (!session) {
-    throw new ServiceError(
-      `Session not found: ${input.approval.sessionId}`,
-      404
-    );
-  }
-
-  if (session.status !== 'waiting_approval') {
-    throw new ServiceError('Session is not waiting for approval.', 409);
-  }
-
-  if (input.toolCall.sessionId !== input.approval.sessionId) {
-    throw new ServiceError('Approval and tool call session mismatch.', 409);
-  }
-
-  if (!input.toolCall.requiresApproval) {
-    throw new ServiceError('Tool call does not require approval.', 409);
-  }
-
-  if (
-    input.toolCall.status !== 'pending_approval' &&
-    input.toolCall.status !== 'pending'
-  ) {
-    throw new ServiceError('Tool call is no longer waiting for approval.', 409);
-  }
-
-  const pendingApprovals = approvalRepository.listPendingBySession(
-    input.approval.sessionId
-  );
-
-  if (pendingApprovals.length !== 1) {
-    throw new ServiceError(
-      `Expected one pending approval, found ${pendingApprovals.length}.`,
-      409
-    );
-  }
-
-  if (pendingApprovals[0]?.id !== input.approval.id) {
-    throw new ServiceError(
-      'Pending approval does not match session checkpoint.',
-      409
-    );
-  }
-
-  const checkpoint = parseCheckpoint(session.lastCheckpointJson);
-
-  if (
-    checkpoint?.kind !== 'waiting_approval' ||
-    checkpoint.approvalId !== input.approval.id ||
-    checkpoint.toolCallId !== input.toolCall.id ||
-    !checkpoint.partId ||
-    !checkpoint.messageId ||
-    !checkpoint.modelToolCallId
-  ) {
-    throw new ServiceError('Session checkpoint does not match approval.', 409);
-  }
-
-  const part = partService.getPart(checkpoint.partId);
-
-  if (!part || part.type !== 'tool') {
-    throw new ServiceError(
-      `Pending ToolPart not found: ${checkpoint.partId}`,
-      409
-    );
-  }
-
-  if (part.state.status !== 'pending') {
-    throw new ServiceError('Approval ToolPart is no longer pending.', 409);
-  }
-
-  if (
-    part.toolCallId !== input.toolCall.id ||
-    part.id !== input.toolCall.messagePartId ||
-    part.messageId !== input.toolCall.messageId ||
-    part.modelToolCallId !== input.toolCall.modelToolCallId ||
-    part.modelToolCallId !== checkpoint.modelToolCallId ||
-    part.messageId !== checkpoint.messageId ||
-    part.sessionId !== input.toolCall.sessionId ||
-    part.toolName !== input.toolCall.toolName ||
-    part.toolName !== input.approval.kind
-  ) {
-    throw new ServiceError('Approval checkpoint does not match ToolPart.', 409);
-  }
-}
-
-export class SessionPromptService {
+export class SessionInteractionService {
   constructor(
     private readonly runner: SessionRunner = sessionRunner,
     private readonly runtimeLifecycle: Lifecycle = lifecycle
@@ -224,7 +112,7 @@ export class SessionPromptService {
       );
     }
 
-    assertApprovalResumeReady({ approval, toolCall });
+    sessionResumeService.assertApprovalResumeReady({ approval, toolCall });
 
     const response = await this.runner.ensureRunning(
       approval.sessionId,
@@ -266,4 +154,4 @@ export class SessionPromptService {
   }
 }
 
-export const sessionPromptService = new SessionPromptService();
+export const sessionInteractionService = new SessionInteractionService();

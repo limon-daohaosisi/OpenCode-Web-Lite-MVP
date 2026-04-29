@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SessionRunner } from '../services/session/runner.js';
+import { SessionRunner } from '../services/agent/runner.js';
 
 function waitForBackgroundTurn() {
   return new Promise<void>((resolve) => {

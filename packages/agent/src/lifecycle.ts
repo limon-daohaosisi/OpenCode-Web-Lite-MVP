@@ -6,6 +6,7 @@ import type {
   SessionStatus,
   ToolCallDto
 } from '@opencode/shared';
+import { validateApprovalResume } from './approval-resume.js';
 import { parseSessionCheckpoint } from './checkpoint.js';
 import type { RunLoop, RunLoopResult } from './run-loop.js';
 import type { ToolExecutor } from './tool-executor.js';
@@ -49,12 +50,6 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown runtime error.';
 }
 
-function isPendingApprovalToolCall(toolCall: ToolCallDto) {
-  return (
-    toolCall.status === 'pending_approval' || toolCall.status === 'pending'
-  );
-}
-
 export class Lifecycle {
   constructor(
     private readonly loop: Pick<RunLoop, 'run'>,
@@ -73,71 +68,24 @@ export class Lifecycle {
 
       const checkpoint = parseSessionCheckpoint(session.lastCheckpointJson);
 
-      if (session.status !== 'waiting_approval') {
-        throw new Error('Session is not waiting for approval.');
-      }
+      const part = checkpoint?.partId
+        ? this.deps.getMessagePart(checkpoint.partId)
+        : null;
+      const resumeValidation = validateApprovalResume({
+        approval: input.approval,
+        checkpoint,
+        part,
+        session,
+        toolCall: input.toolCall
+      });
 
-      if (input.approval.status !== 'pending') {
-        throw new Error('Approval has already been decided.');
-      }
-
-      if (input.toolCall.sessionId !== input.approval.sessionId) {
-        throw new Error('Approval and tool call belong to different sessions.');
-      }
-
-      if (input.toolCall.id !== input.approval.toolCallId) {
-        throw new Error('Approval does not match tool call.');
-      }
-
-      if (!input.toolCall.requiresApproval) {
-        throw new Error('Tool call does not require approval.');
-      }
-
-      if (!isPendingApprovalToolCall(input.toolCall)) {
-        throw new Error('Tool call is no longer waiting for approval.');
-      }
-
-      if (
-        checkpoint?.kind !== 'waiting_approval' ||
-        checkpoint.approvalId !== input.approval.id ||
-        !checkpoint.partId ||
-        !checkpoint.messageId ||
-        !checkpoint.modelToolCallId ||
-        !checkpoint.toolCallId
-      ) {
-        throw new Error('Session checkpoint is missing approval resume data.');
-      }
-
-      const part = this.deps.getMessagePart(checkpoint.partId);
-
-      if (!part || part.type !== 'tool') {
-        throw new Error(`Pending ToolPart not found: ${checkpoint.partId}`);
-      }
-
-      if (
-        part.messageId !== checkpoint.messageId ||
-        part.modelToolCallId !== checkpoint.modelToolCallId ||
-        part.toolCallId !== checkpoint.toolCallId ||
-        part.id !== input.toolCall.messagePartId ||
-        part.messageId !== input.toolCall.messageId ||
-        part.modelToolCallId !== input.toolCall.modelToolCallId ||
-        part.sessionId !== input.toolCall.sessionId ||
-        part.toolName !== input.toolCall.toolName
-      ) {
-        throw new Error('Approval checkpoint does not match pending ToolPart.');
-      }
-
-      if (part.state.status !== 'pending') {
-        throw new Error('Approval ToolPart is no longer pending.');
-      }
-
-      if (part.toolName !== input.approval.kind) {
-        throw new Error('Approval kind does not match ToolPart.');
+      if (!resumeValidation.ok) {
+        throw new Error(resumeValidation.reason);
       }
 
       await this.deps.toolExecutor.executeApprovedPart({
         decision: input.decision,
-        part,
+        part: resumeValidation.context.part,
         sessionId: input.approval.sessionId,
         workspaceRoot: this.deps.getWorkspaceRootPath(input.approval.sessionId)
       });
